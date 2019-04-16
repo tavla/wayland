@@ -1629,3 +1629,156 @@ TEST(global_remove)
 
 	display_destroy(d);
 }
+
+static void *
+thread_prepare_and_read_nocheck(void *data)
+{
+	struct client *c = data;
+
+	register_reading(c->wl_display);
+
+	c->display_stopped = 1;
+
+	wl_display_read_events(c->wl_display);
+	wl_display_dispatch_pending(c->wl_display);
+
+	pthread_exit(NULL);
+}
+
+static void
+threading_stop_readers(void)
+{
+	struct client *c = client_connect();
+	pthread_t th1, th2, th3;
+
+	register_reading(c->wl_display);
+
+	th1 = create_thread(c, thread_prepare_and_read_nocheck);
+	th2 = create_thread(c, thread_prepare_and_read_nocheck);
+	th3 = create_thread(c, thread_prepare_and_read_nocheck);
+
+	test_set_timeout(3);
+	wl_display_cancel_read(c->wl_display);
+	wl_display_stop(c->wl_display, 1);
+	pthread_join(th1, NULL);
+	pthread_join(th2, NULL);
+	pthread_join(th3, NULL);
+
+	client_disconnect(c);
+}
+
+TEST(threading_stop_readers_tst)
+{
+	struct display *d = display_create();
+	client_create_noarg(d, threading_stop_readers);
+
+	display_run(d);
+
+	display_destroy(d);
+}
+
+static void *
+thread_prepare_and_poll(void *data)
+{
+	struct client *c = data;
+	int ret = 0;
+	struct pollfd pfd[2];
+
+	register_reading(c->wl_display);
+
+	c->display_stopped = 1;
+
+	pfd[0].fd = wl_display_get_fd(c->wl_display);
+	pfd[0].events = POLLIN;
+	pfd[1].fd = wl_display_get_stop_fd(c->wl_display);
+	pfd[1].events = POLLIN;
+
+	do {
+		ret = poll(pfd, 2, -1);
+		if (pfd[1].revents & POLLIN) {
+			wl_display_cancel_read(c->wl_display);
+			break;
+		}
+	} while (ret == -1 && errno == EINTR);
+
+	pthread_exit(NULL);
+}
+
+static void
+threading_stop_pollers(void)
+{
+	struct client *c = client_connect();
+	pthread_t th1, th2, th3;
+
+	register_reading(c->wl_display);
+
+	th1 = create_thread(c, thread_prepare_and_poll);
+	th2 = create_thread(c, thread_prepare_and_poll);
+	th3 = create_thread(c, thread_prepare_and_poll);
+
+	test_set_timeout(3);
+	wl_display_cancel_read(c->wl_display);
+	wl_display_stop(c->wl_display, 1);
+	pthread_join(th1, NULL);
+	pthread_join(th2, NULL);
+	pthread_join(th3, NULL);
+
+	client_disconnect(c);
+}
+
+TEST(threading_stop_pollers_tst)
+{
+	struct display *d = display_create();
+	client_create_noarg(d, threading_stop_pollers);
+
+	display_run(d);
+
+	display_destroy(d);
+}
+
+static void *
+thread_dispatch_loop(void *data)
+{
+	struct client *c = data;
+	int ret = 0;
+
+	c->display_stopped = 1;
+
+	do {
+		ret = wl_display_dispatch(c->wl_display);
+	} while (ret == 0);
+
+	pthread_exit(NULL);
+}
+
+static void
+threading_stop_dispatch_loop(void)
+{
+	struct client *c = client_connect();
+	pthread_t th1, th2, th3;
+
+	register_reading(c->wl_display);
+
+	th1 = create_thread(c, thread_dispatch_loop);
+	th2 = create_thread(c, thread_dispatch_loop);
+	th3 = create_thread(c, thread_dispatch_loop);
+
+	test_set_timeout(3);
+	wl_display_cancel_read(c->wl_display);
+	wl_display_stop(c->wl_display, 1);
+	pthread_join(th1, NULL);
+	pthread_join(th2, NULL);
+	pthread_join(th3, NULL);
+
+	client_disconnect(c);
+}
+
+TEST(threading_stop_dispatch_loop_tst)
+{
+	struct display *d = display_create();
+	client_create_noarg(d, threading_stop_dispatch_loop);
+
+	display_run(d);
+
+	display_destroy(d);
+}
