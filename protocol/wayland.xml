@@ -1723,7 +1723,7 @@
     </request>
    </interface>
 
-  <interface name="wl_seat" version="7">
+  <interface name="wl_seat" version="8">
     <description summary="group of input devices">
       A seat is a group of keyboards, pointer and touch devices. This
       object is published as a global during start up, or when such a
@@ -2155,7 +2155,7 @@
     </event>
   </interface>
 
-  <interface name="wl_keyboard" version="7">
+  <interface name="wl_keyboard" version="8">
     <description summary="keyboard input device">
       The wl_keyboard interface represents one or more keyboards
       associated with a seat.
@@ -2266,6 +2266,25 @@
 	   summary="the rate of repeating keys in characters per second"/>
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
+    </event>
+
+    <!-- Version 8 additions -->
+
+    <event name="logical_keyboard" since="8">
+      <description summary="">
+	This event is sent at least once before any key, modifiers and keymap events.
+	Each following key, modifiers and keymap event belongs to the logical keyboard with the ID of the most recent logical_keyboard event.
+      </description>
+      <arg name="id" type="uint" summary="logical keyboard ID"/>
+    </event>
+
+    <event name="logical_keyboard_done" since="8">
+      <description summary="">
+	The logical keyboard with ID will receive no further events.
+	This means in particular that the keymap associated with this
+	logical keyboard is no longer needed.
+      </description>
+      <arg name="id" type="uint" summary="logical keyboard ID"/>
     </event>
   </interface>
 
