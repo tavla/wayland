@@ -49,6 +49,10 @@
 #include "wayland-private.h"
 #include "wayland-server.h"
 
+#ifndef MAP_NOSIGBUS
+#define MAP_NOSIGBUS 0x200000
+#endif
+
 /* This once_t is used to synchronize installing the SIGBUS handler
  * and creating the TLS key. This will be done in the first call
  * wl_shm_buffer_begin_access which can happen from any thread */
@@ -284,7 +288,7 @@ shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 		seals = 0;
 	pool->sigbus_is_impossible = (seals & F_SEAL_SHRINK) ? true : false;
 #else
-	pool->sigbus_is_impossible = false;
+	pool->sigbus_is_impossible = true;
 #endif
 
 	pool->internal_refcount = 1;
@@ -292,7 +296,7 @@ shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 	pool->size = size;
 	pool->new_size = size;
 	pool->data = mmap(NULL, size,
-			  PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+			  PROT_READ, MAP_PRIVATE | MAP_NOSIGBUS, fd, 0);
 	if (pool->data == MAP_FAILED) {
 		wl_resource_post_error(resource,
 				       WL_SHM_ERROR_INVALID_FD,
