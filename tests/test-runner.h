@@ -37,11 +37,18 @@ struct test {
 	int must_fail;
 } __attribute__ ((aligned (16)));
 
+#if defined(__clang__)
+#define SUPPRESS_ASAN __attribute__ ((no_sanitize("address")))
+#else
+#define SUPPRESS_ASAN
+#endif
+
 #define TEST(name)							\
 	static void name(void);						\
 									\
 	const struct test test##name					\
-		 __attribute__ ((used, section ("test_section"))) = {	\
+		SUPPRESS_ASAN						\
+		__attribute__ ((used, section ("test_section"))) = {	\
 		#name, name, 0						\
 	};								\
 									\
@@ -51,7 +58,8 @@ struct test {
 	static void name(void);						\
 									\
 	const struct test test##name					\
-		 __attribute__ ((used, section ("test_section"))) = {	\
+		SUPPRESS_ASAN						\
+		__attribute__ ((used, section ("test_section"))) = {	\
 		#name, name, 1						\
 	};								\
 									\
