@@ -151,12 +151,24 @@ if get_option('libraries')
 		output: 'wayland-protocol.c'
 	)
 
+	wayland_core_protocols = library(
+		'wayland-core-protocols',
+		sources: [
+			wayland_protocol_c
+		],
+		version: '0.1.0',
+		include_directories: root_inc,
+		install: true
+	)
+	wayland_core_protocols_dep = declare_dependency(
+		link_with: wayland_core_protocols
+	)
+
 	wayland_server = library(
 		'wayland-server',
 		sources: [
 			wayland_server_protocol_core_h,
 			wayland_server_protocol_h,
-			wayland_protocol_c,
 			'wayland-server.c',
 			'wayland-shm.c',
 			'event-loop.c'
@@ -164,6 +176,7 @@ if get_option('libraries')
 		version: '0.1.0',
 		dependencies: [
 			ffi_dep,
+			wayland_core_protocols_dep,
 			wayland_private_dep,
 			wayland_util_dep,
 			mathlib_dep,
@@ -190,6 +203,7 @@ if get_option('libraries')
 		description: 'Server side implementation of the Wayland protocol',
 		version: meson.project_version(),
 		filebase: 'wayland-server',
+		libraries: '-lwayland-core-protocols',
 		variables: [
 			'datarootdir=' + join_paths('${prefix}', get_option('datadir')),
 			'pkgdatadir=' + join_paths('${datarootdir}', meson.project_name())
@@ -201,12 +215,12 @@ if get_option('libraries')
 		sources: [
 			wayland_client_protocol_core_h,
 			wayland_client_protocol_h,
-			wayland_protocol_c,
 			'wayland-client.c'
 		],
 		version: '0.3.0',
 		dependencies: [
 			ffi_dep,
+			wayland_core_protocols_dep,
 			wayland_private_dep,
 			wayland_util_dep,
 			mathlib_dep,
@@ -222,6 +236,7 @@ if get_option('libraries')
 		description: 'Wayland client side library',
 		version: meson.project_version(),
 		filebase: 'wayland-client',
+		libraries: '-lwayland-core-protocols',
 		variables: [
 			'datarootdir=' + join_paths('${prefix}', get_option('datadir')),
 			'pkgdatadir=' + join_paths('${datarootdir}', meson.project_name())

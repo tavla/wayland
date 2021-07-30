@@ -22,7 +22,8 @@ test_runner_dep = declare_dependency(
 	include_directories: [ src_inc ],
 	dependencies: [
 		dependency('threads'),
-		cc.find_library('dl', required: false)
+		cc.find_library('dl', required: false),
+		wayland_core_protocols_dep
 	]
 )
 
