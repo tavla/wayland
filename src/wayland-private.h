@@ -232,7 +232,4 @@ zalloc(size_t s)
 	return calloc(1, s);
 }
 
-void
-wl_connection_close_fds_in(struct wl_connection *connection, int max);
-
 #endif

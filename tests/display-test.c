@@ -1629,3 +1629,134 @@ TEST(global_remove)
 
 	display_destroy(d);
 }
+
+struct new_zombie_data {
+	struct necromancer *necromancer;
+	struct necromancer *necromancer_two;
+	struct noop *temp_noop;
+};
+
+static void
+server_object(void *data, struct necromancer *necro, struct noop *noop)
+{
+	struct new_zombie_data *nzd = data;
+
+	/* We should only see this once, since one of the two noop
+	 * objects we create should be created as a zombie */
+	assert(!nzd->temp_noop);
+	nzd->temp_noop = noop;
+}
+
+struct necromancer_listener necromancer_listener = {
+	server_object,
+};
+
+static void
+new_zombie_handle_globals(void *data, struct wl_registry *registry,
+			  uint32_t id, const char *intf, uint32_t ver)
+{
+	struct new_zombie_data *rg = data;
+
+	if (!strcmp(intf, "necromancer")) {
+		rg->necromancer = wl_registry_bind(registry, id, &necromancer_interface, 1);
+		rg->necromancer_two = wl_registry_bind(registry, id, &necromancer_interface, 1);
+		necromancer_add_listener(rg->necromancer, &necromancer_listener, NULL);
+		necromancer_add_listener(rg->necromancer_two, &necromancer_listener, rg);
+	}
+}
+
+static const struct wl_registry_listener new_zombie_registry_listener = {
+	new_zombie_handle_globals,
+	NULL
+};
+
+static void noop_destructor(struct wl_client *client, struct wl_resource *res)
+{
+	wl_resource_destroy(res);
+}
+
+static const struct noop_interface noop_server_interface = {
+	noop_destructor
+};
+
+static void
+send_new_object(struct wl_client *client, struct wl_resource *res)
+{
+	struct wl_resource *new_res;
+
+	new_res = wl_resource_create(client, &noop_interface, 1, 0);
+	wl_resource_set_implementation(new_res, &noop_server_interface, NULL, NULL);
+	necromancer_send_server_object(res, new_res);
+}
+
+static void necromancer_destructor(struct wl_client *client, struct wl_resource *res)
+{
+	wl_resource_destroy(res);
+}
+
+static const struct necromancer_interface necro_interface = {
+	necromancer_destructor,
+	send_new_object
+};
+
+static void
+bind_necromancer(struct wl_client *client, void *data,
+		 uint32_t vers, uint32_t id)
+{
+	struct wl_resource *res;
+
+	res = wl_resource_create(client, &necromancer_interface, vers, id);
+	wl_resource_set_implementation(res, &necro_interface, NULL, NULL);
+}
+
+static void
+spawn_new_zombie(void *data)
+{
+	struct new_zombie_data rg = {};
+	struct client *c = client_connect();
+	struct wl_registry *reg;
+
+	reg = wl_display_get_registry(c->wl_display);
+	wl_registry_add_listener(reg, &new_zombie_registry_listener, &rg);
+
+	/* Get the globals */
+	wl_display_roundtrip(c->wl_display);
+
+	wl_registry_destroy(reg);
+
+	necromancer_create_server_object(rg.necromancer);
+	necromancer_create_server_object(rg.necromancer_two);
+	necromancer_destroy(rg.necromancer);
+	/* We should now have two new_id events on the way,
+	 * and the first one will be destined for a zombie
+	 * when it arrives. That would violate the wl_map
+	 * requirement that a new id can only be one higher
+	 * than the current max id in the map if we simply
+	 * dropped the first inbound object.
+	 */
+
+	wl_display_roundtrip(c->wl_display);
+	assert(rg.temp_noop);
+	noop_destroy(rg.temp_noop);
+	necromancer_destroy(rg.necromancer_two);
+	wl_display_roundtrip(c->wl_display);
+	client_disconnect(c);
+}
+
+TEST(new_zombie)
+{
+	struct display *d;
+	struct wl_global *g;
+
+	d = display_create();
+	g = wl_global_create(d->wl_display, &necromancer_interface,
+			     1, d, bind_necromancer);
+
+	client_create_noarg(d, spawn_new_zombie);
+
+	display_run(d);
+
+	wl_global_destroy(g);
+
+	display_destroy(d);
+}

@@ -200,12 +200,6 @@ close_fds(struct wl_ring_buffer *buffer, int max)
 	buffer->tail += size;
 }
 
-void
-wl_connection_close_fds_in(struct wl_connection *connection, int max)
-{
-	close_fds(&connection->fds_in, max);
-}
-
 int
 wl_connection_destroy(struct wl_connection *connection)
 {
@@ -809,7 +803,8 @@ wl_connection_demarshal(struct wl_connection *connection,
 				goto err;
 			}
 
-			if (wl_map_reserve_new(objects, id) < 0) {
+			if (wl_map_reserve_new(objects, id) < 0 &&
+			    !wl_object_is_zombie(objects, id)) {
 				wl_log("not a valid new object id (%u), "
 				       "message %s(%s)\n",
 				       id, message->name, message->signature);
@@ -879,10 +874,6 @@ wl_object_is_zombie(struct wl_map *map, uint32_t id)
 	if (map->side == WL_MAP_SERVER_SIDE)
 		return false;
 
-	/* Zombie objects can only have been created by the client. */
-	if (id >= WL_SERVER_ID_START)
-		return false;
-
 	flags = wl_map_lookup_flags(map, id);
 	return !!(flags & WL_MAP_ENTRY_ZOMBIE);
 }
@@ -909,8 +900,7 @@ wl_closure_lookup_objects(struct wl_closure *closure, struct wl_map *objects)
 
 			object = wl_map_lookup(objects, id);
 			if (wl_object_is_zombie(objects, id)) {
-				/* references object we've already
-				 * destroyed client side */
+				/* references object we've already destroyed */
 				object = NULL;
 			} else if (object == NULL && id != 0) {
 				wl_log("unknown object (%u), message %s(%s)\n",
