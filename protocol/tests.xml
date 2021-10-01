@@ -49,4 +49,35 @@
       <arg name="passer" type="object" interface="fd_passer"/>
     </request>
   </interface>
+
+  <interface name="noop" version="1">
+    <description summary="An interface that does nothing">
+      A trivial interface.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+  </interface>
+
+  <interface name="necromancer" version="1">
+    <description summary="Helper for creating zombie objects">
+      Simple interface for generating server side objects to use in
+      zombie tests.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+
+    <request name="create_server_object">
+      <description summary="create a new server side object">
+        Create a new server side object.
+      </description>
+    </request>
+
+    <event name="server_object">
+      <description summary="server side object">
+      </description>
+      <arg name="id" type="new_id" interface="noop" summary="server side object"/>
+    </event>
+
+
+  </interface>
 </protocol>

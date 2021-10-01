@@ -55,11 +55,6 @@ enum wl_proxy_flag {
 	WL_PROXY_FLAG_WRAPPER = (1 << 2),
 };
 
-struct wl_zombie {
-	int event_count;
-	int *fd_count;
-};
-
 struct wl_proxy {
 	struct wl_object object;
 	struct wl_display *display;
@@ -352,62 +347,11 @@ wl_display_create_queue(struct wl_display *display)
 	return queue;
 }
 
-static int
-message_count_fds(const char *signature)
-{
-	unsigned int count, i, fds = 0;
-	struct argument_details arg;
-
-	count = arg_count_for_signature(signature);
-	for (i = 0; i < count; i++) {
-		signature = get_next_argument(signature, &arg);
-		if (arg.type == 'h')
-			fds++;
-	}
-
-	return fds;
-}
-
-static struct wl_zombie *
-prepare_zombie(struct wl_proxy *proxy)
-{
-	const struct wl_interface *interface = proxy->object.interface;
-	const struct wl_message *message;
-	int i, count;
-	struct wl_zombie *zombie = NULL;
-
-	/* If we hit an event with an FD, ensure we have a zombie object and
-	 * fill the fd_count slot for that event with the number of FDs for
-	 * that event. Interfaces with no events containing FDs will not have
-	 * zombie objects created. */
-	for (i = 0; i < interface->event_count; i++) {
-		message = &interface->events[i];
-		count = message_count_fds(message->signature);
-
-		if (!count)
-			continue;
-
-		if (!zombie) {
-			zombie = zalloc(sizeof(*zombie) +
-				        (interface->event_count * sizeof(int)));
-			if (!zombie)
-				return NULL;
-
-			zombie->event_count = interface->event_count;
-			zombie->fd_count = (int *) &zombie[1];
-		}
-
-		zombie->fd_count[i] = count;
-	}
-
-	return zombie;
-}
-
 static enum wl_iterator_result
 free_zombies(void *element, void *data, uint32_t flags)
 {
 	if (flags & WL_MAP_ENTRY_ZOMBIE)
-		free(element);
+		wl_proxy_unref(element);
 
 	return WL_ITERATOR_CONTINUE;
 }
@@ -471,7 +415,7 @@ static struct wl_proxy *
 wl_proxy_create_for_id(struct wl_proxy *factory,
 		       uint32_t id, const struct wl_interface *interface)
 {
-	struct wl_proxy *proxy;
+	struct wl_proxy *proxy, *zombie;
 	struct wl_display *display = factory->display;
 
 	proxy = zalloc(sizeof *proxy);
@@ -484,6 +428,9 @@ wl_proxy_create_for_id(struct wl_proxy *factory,
 	proxy->queue = factory->queue;
 	proxy->refcount = 1;
 	proxy->version = factory->version;
+	zombie = wl_map_lookup(&display->objects, id);
+	if (zombie && wl_object_is_zombie(&display->objects, id))
+		wl_proxy_unref(zombie);
 
 	wl_map_insert_at(&display->objects, 0, id, proxy);
 
@@ -493,25 +440,21 @@ wl_proxy_create_for_id(struct wl_proxy *factory,
 static void
 proxy_destroy(struct wl_proxy *proxy)
 {
+	proxy->flags |= WL_PROXY_FLAG_DESTROYED;
+
 	if (proxy->flags & WL_PROXY_FLAG_ID_DELETED) {
 		wl_map_remove(&proxy->display->objects, proxy->object.id);
-	} else if (proxy->object.id < WL_SERVER_ID_START) {
-		struct wl_zombie *zombie = prepare_zombie(proxy);
-
-		/* The map now contains the zombie entry, until the delete_id
-		 * event arrives. */
+		wl_proxy_unref(proxy);
+	} else {
+		/* The map now contains the zombie entry. A delete_id
+		 * event will clean up client generated ids eventually,
+		 * server generated ids will linger until they're
+		 * overwritten. */
 		wl_map_insert_at(&proxy->display->objects,
 				 WL_MAP_ENTRY_ZOMBIE,
 				 proxy->object.id,
-				 zombie);
-	} else {
-		wl_map_insert_at(&proxy->display->objects, 0,
-				 proxy->object.id, NULL);
+				 proxy);
 	}
-
-	proxy->flags |= WL_PROXY_FLAG_DESTROYED;
-
-	wl_proxy_unref(proxy);
 }
 
 static void
@@ -1034,9 +977,7 @@ display_handle_delete_id(void *data, struct wl_display *display, uint32_t id)
 	proxy = wl_map_lookup(&display->objects, id);
 
 	if (wl_object_is_zombie(&display->objects, id)) {
-		/* For zombie objects, the 'proxy' is actually the zombie
-		 * event-information structure, which we can free. */
-		free(proxy);
+		wl_proxy_unref(proxy);
 		wl_map_remove(&display->objects, id);
 	} else if (proxy) {
 		proxy->flags |= WL_PROXY_FLAG_ID_DELETED;
@@ -1411,6 +1352,7 @@ create_proxies(struct wl_proxy *sender, struct wl_closure *closure)
 			if (proxy == NULL)
 				return -1;
 			closure->args[i].o = (struct wl_object *)proxy;
+
 			break;
 		default:
 			break;
@@ -1447,6 +1389,30 @@ increase_closure_args_refcount(struct wl_closure *closure)
 	closure->proxy->refcount++;
 }
 
+static void
+inter_zombie_closure(struct wl_closure *closure)
+{
+	const char *signature;
+	struct argument_details arg;
+	int i, count;
+	struct wl_proxy *proxy;
+
+	signature = closure->message->signature;
+	count = arg_count_for_signature(signature);
+	for (i = 0; i < count; i++) {
+		signature = get_next_argument(signature, &arg);
+		switch (arg.type) {
+		case 'n':
+			proxy = (struct wl_proxy *) closure->args[i].o;
+			if (proxy)
+				proxy_destroy(proxy);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 static int
 queue_event(struct wl_display *display, int len)
 {
@@ -1458,7 +1424,7 @@ queue_event(struct wl_display *display, int len)
 	struct wl_event_queue *queue;
 	struct timespec tp;
 	unsigned int time;
-	int num_zombie_fds;
+	bool zombie = false;
 
 	wl_connection_copy(display->connection, p, sizeof p);
 	id = p[0];
@@ -1467,29 +1433,18 @@ queue_event(struct wl_display *display, int len)
 	if (len < size)
 		return 0;
 
-	/* If our proxy is gone or a zombie, just eat the event (and any FDs,
-	 * if applicable). */
+	/* If our proxy is gone, just eat the event. */
 	proxy = wl_map_lookup(&display->objects, id);
-	if (!proxy || wl_object_is_zombie(&display->objects, id)) {
-		struct wl_zombie *zombie = wl_map_lookup(&display->objects, id);
-		num_zombie_fds = (zombie && opcode < zombie->event_count) ?
-			zombie->fd_count[opcode] : 0;
-
+	if (!proxy) {
 		if (debug_client) {
 			clock_gettime(CLOCK_REALTIME, &tp);
 			time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
-			fprintf(stderr, "[%7u.%03u] discarded [%s]@%d.[event %d]"
-				"(%d fd, %d byte)\n",
+			fprintf(stderr, "[%7u.%03u] discarded @%d.[event %d]"
+				"(%d byte)\n",
 				time / 1000, time % 1000,
-				zombie ? "zombie" : "unknown",
-				id, opcode,
-				num_zombie_fds, size);
+				id, opcode, size);
 		}
-		if (num_zombie_fds > 0)
-			wl_connection_close_fds_in(display->connection,
-						   num_zombie_fds);
-
 		wl_connection_consume(display->connection, size);
 		return size;
 	}
@@ -1514,6 +1469,13 @@ queue_event(struct wl_display *display, int len)
 	if (wl_closure_lookup_objects(closure, &display->objects) != 0) {
 		wl_closure_destroy(closure);
 		return -1;
+	}
+
+	zombie = wl_object_is_zombie(&display->objects, id);
+	if (zombie) {
+		inter_zombie_closure(closure);
+		wl_closure_destroy(closure);
+		return size;
 	}
 
 	closure->proxy = proxy;
