@@ -1157,8 +1157,8 @@ TEST(bind_fails_on_filtered_global)
 	*name = 0;
 
 	display_run(d);
-	/* wl_data_offer should be 2 */
-	assert(*name == 2);
+	/* wl_data_offer should be 3 */
+	assert(*name == 3);
 	wl_display_set_global_filter(d->wl_display, global_filter, NULL);
 
 	/* Try to bind to the interface name when a global filter is in place */

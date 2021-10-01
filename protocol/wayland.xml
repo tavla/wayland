@@ -62,7 +62,10 @@
 	response to a get_registry request can only be released when the
 	client disconnects, not when the client side proxy is destroyed.
 	Therefore, clients should invoke get_registry as infrequently as
-	possible to avoid wasting memory.
+	possible to avoid wasting memory.  Servers that expose the
+	wl_fixes interface do provide a way to release the server side
+	resources, though it is still preferable to call get_registry
+	as few times as possible.
       </description>
       <arg name="registry" type="new_id" interface="wl_registry"
 	   summary="global registry object"/>
@@ -141,6 +144,13 @@
       </description>
       <arg name="name" type="uint" summary="unique numeric name of the object"/>
       <arg name="id" type="new_id" summary="bounded object"/>
+    </request>
+
+    <request name="release" type="destructor">
+      <description summary="destroy global registry object">
+	This requests destroys a global registry object.  Servers that do not
+	expose the wl_fixes global must be assumed to not implement this method.
+      </description>
     </request>
 
     <event name="global">
@@ -3245,4 +3255,21 @@
     </request>
   </interface>
 
+  <interface name="wl_fixes" version="1">
+    <description summary="Fixes for bugs in the Wayland protocol">
+      This interface is a hack to work around bugs in the Wayland protocol
+      which cannot be fixed in other ways.  It is a singleton global.
+      Currently, its existance only serves to indicate that a server
+      supports destruction of wl_registry objects, which cannot be
+      communicated through any other means.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="unbind from the wl_fixes interface">
+	Informs the server that the client will not be using this
+	protocol object anymore. This does not affect any other
+	objects.
+      </description>
+    </request>
+  </interface>
 </protocol>
