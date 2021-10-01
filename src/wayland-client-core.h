@@ -235,6 +235,12 @@ int
 wl_display_get_fd(struct wl_display *display);
 
 int
+wl_display_get_stop_fd(struct wl_display *display);
+
+int
+wl_display_stop(struct wl_display *display, int wait_readers);
+
+int
 wl_display_dispatch(struct wl_display *display);
 
 int
