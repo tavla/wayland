@@ -11,7 +11,7 @@ wayland_cursor = library(
 		'xcursor.c',
 	],
 	version: '0.0.0',
-	dependencies: [ wayland_client_dep ],
+	dependencies: [ wayland_client_dep, wayland_core_protocols_dep ],
 	c_args: [ '-DICONDIR="@0@"'.format(icondir) ],
 	install: true,
 )
