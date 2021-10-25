@@ -85,6 +85,7 @@ struct wl_client {
 	int error;
 	struct wl_priv_signal resource_created_signal;
 	int pidfd;
+	void *data;
 };
 
 struct wl_display {
@@ -527,6 +528,7 @@ wl_client_create(struct wl_display *display, int fd)
 
 	wl_priv_signal_init(&client->resource_created_signal);
 	client->display = display;
+	client->data = NULL;
 	client->source = wl_event_loop_add_fd(display->loop, fd,
 					      WL_EVENT_READABLE,
 					      wl_client_connection_data, client);
@@ -2326,6 +2328,18 @@ wl_client_new_object(struct wl_client *client,
 					       implementation, data, NULL);
 
 	return resource;
+}
+
+WL_EXPORT void
+wl_client_set_user_data(struct wl_client *client, void *data)
+{
+	client->data = data;
+}
+
+WL_EXPORT void *
+wl_client_get_user_data(struct wl_client *client)
+{
+	return client->data;
 }
 
 struct wl_global *
