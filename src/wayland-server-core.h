@@ -316,6 +316,9 @@ void
 wl_client_get_credentials(struct wl_client *client,
 			  pid_t *pid, uid_t *uid, gid_t *gid);
 
+void
+wl_client_get_pidfd(struct wl_client *client, int *pidfd);
+
 int
 wl_client_get_fd(struct wl_client *client);
 
