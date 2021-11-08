@@ -105,8 +105,10 @@ formats = {}
 for ident, val in idents.items():
     formats[drm_format_to_wl(ident)] = val.lower()
 # Special case for ARGB8888 and XRGB8888
-formats["argb8888"] = "0"
-formats["xrgb8888"] = "1"
+for (i, j) in enumerate(("argb8888", "xrgb8888")):
+    formats[j + "_new"] = formats[j]
+    descriptions[j + "_new"] = descriptions[j]
+    formats[j] = str(i)
 
 print("Loaded {} formats from drm_fourcc.h".format(len(formats)), file=sys.stderr)
 
