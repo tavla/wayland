@@ -228,7 +228,7 @@ wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
  */
 void *
 wl_os_mremap_maymove(int fd, void *old_data, ssize_t *old_size,
-		     ssize_t new_size, int prot, int flags)
+		     ssize_t new_size, int prot, int flags, int keep_mapping)
 {
 	void *result;
 	/*
@@ -243,7 +243,7 @@ wl_os_mremap_maymove(int fd, void *old_data, ssize_t *old_size,
 	if (result != MAP_FAILED) {
 		/* Copy the data over and unmap the old mapping. */
 		memcpy(result, old_data, *old_size);
-		if (munmap(old_data, *old_size) == 0) {
+		if (!keep_mapping && munmap(old_data, *old_size) == 0) {
 			*old_size = 0; /* successfully unmapped old data. */
 		}
 	}
