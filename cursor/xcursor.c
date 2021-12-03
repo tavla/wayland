@@ -479,6 +479,31 @@ xcursor_xc_file_load_images(FILE *file, int size)
 	return images;
 }
 
+static const char *
+xcursor_next_path(const char *path);
+
+static void
+xcursor_add_path_elt(char *path, const char *elt, int len)
+{
+	int pathlen = strlen (path);
+	/* append / if the path doesn't currently have one */
+	if (pathlen == 0 || path[pathlen - 1] != '/')
+	{
+		strcat(path, "/");
+		pathlen++;
+	}
+	/* may be unsafe? */
+	if (len == -1)
+	len = strlen(elt);
+	/* strip leading slashes */
+	while (len && elt[0] == '/')
+	{
+		elt++;
+		len--;
+	}
+	snprintf(path + pathlen, len + 1, "%s", elt);
+}
+
 /*
  * From libXcursor/src/library.c
  */
@@ -488,11 +513,72 @@ xcursor_xc_file_load_images(FILE *file, int size)
 #endif
 
 #ifndef XCURSORPATH
-#define XCURSORPATH "~/.icons:/usr/share/icons:/usr/share/pixmaps:~/.cursors:/usr/share/cursors/xorg-x11:"ICONDIR
+#define XCURSORPATH "/usr/share/icons:/usr/share/pixmaps:~/.cursors:/usr/share/cursors/xorg-x11:"ICONDIR
 #endif
 
+#define XCURSORPATH_BACKWARDS_COMPATIBILITY "~/.icons"
 #define XDG_DATA_HOME_FALLBACK "~/.local/share"
-#define CURSORDIR "/icons"
+#define XDG_DATA_DIRS_FALLBACK "/usr/local/share"
+#define XCURSORPATH_FALLBACK "~/.icons:~/.local/share/icons:/usr/local/share/icons:"XCURSORPATH
+#define CURSORDIR "icons"
+
+static char *
+xcursor_library_colon_append_dir (const char *in_path, const char *dir)
+{
+	const char		*colon_start;
+	const char		*colon_end;
+	char		*path = NULL;
+	int		path_len = 0;
+	int		max_path_len = 0;
+	int		append_len = 0;
+	int		dir_len = strlen (dir);
+
+	// max for adding max num of '/dir', use 'dir_len + 1' as '/' is uncertain
+	max_path_len = strlen(in_path) + 1;
+	for (colon_start = in_path; colon_start; colon_start = xcursor_next_path(colon_start))
+	{
+		max_path_len += dir_len + 1;
+	}
+	path = malloc(max_path_len);
+	if (path == NULL)
+		return NULL;
+
+	path[0] = '\0';
+	path_len = 0;
+
+	colon_start = in_path;
+	while (colon_start != NULL)
+	{
+		/* end at null terminal if not found */
+		colon_end = strchrnul(colon_start, ':');
+		/* copy a path between colon */
+		append_len = snprintf(path + path_len, max_path_len - path_len, "%.*s",
+							(int)(colon_end - colon_start), colon_start);
+
+		if (append_len > 0 && append_len + (dir_len + 1) < max_path_len - path_len)
+		{
+			path_len += append_len;
+			/* join dir, safe here as already checked max_path_len */
+			xcursor_add_path_elt(path + path_len - 1, dir, dir_len);
+			path_len += strlen(path + path_len);
+			/* add ':' */
+			snprintf(path + path_len, max_path_len - path_len, ":");
+			path_len += 1;
+		}
+
+		if(colon_end[0] == ':') {
+			colon_start = colon_end + 1;
+		}
+		else {
+			/* end and replace last ':' */
+			colon_start = NULL;
+			if (path_len > 0 && path[path_len - 1] == ':')
+				path[path_len - 1] = '\0';
+		}
+	}
+	return path;
+}
+
 
 /** Get search path for cursor themes
  *
@@ -506,24 +592,50 @@ xcursor_xc_file_load_images(FILE *file, int size)
 static char *
 xcursor_library_path(void)
 {
-	const char *env_var, *suffix;
-	char *path;
-	size_t path_size;
+	const char *env_var, *xdg_data_home;
+	char *path, *xdg_path;
+	int path_len;
 
 	env_var = getenv("XCURSOR_PATH");
 	if (env_var)
 		return strdup(env_var);
 
-	env_var = getenv("XDG_DATA_HOME");
-	if (!env_var || env_var[0] != '/')
-		env_var = XDG_DATA_HOME_FALLBACK;
+	env_var = getenv("XCURSOR_PATH");
+	if (env_var)
+		path = strdup(env_var);
+	else
+	{
+		env_var = getenv("XDG_DATA_HOME");
+		if (!env_var || env_var[0] != '/')
+			env_var = XDG_DATA_HOME_FALLBACK;
+		xdg_data_home = env_var;
 
-	suffix = CURSORDIR ":" XCURSORPATH;
-	path_size = strlen(env_var) + strlen(suffix) + 1;
-	path = malloc(path_size);
-	if (!path)
-		return NULL;
-	snprintf(path, path_size, "%s%s", env_var, suffix);
+		env_var = getenv("XDG_DATA_DIRS");
+		if (!env_var)
+			env_var = XDG_DATA_DIRS_FALLBACK;
+
+		do
+		{
+			path_len = asprintf(&xdg_path, "%s:%s", xdg_data_home, env_var);
+			if (path_len == -1)
+				break;
+
+			path = xcursor_library_colon_append_dir(xdg_path, CURSORDIR);
+			free(xdg_path);
+			if (path == NULL)
+				break;
+			xdg_path = path;
+
+			path_len = asprintf(&path, "%s%s%s", XCURSORPATH_BACKWARDS_COMPATIBILITY ":",
+			xdg_path, ":" XCURSORPATH);
+			free(xdg_path);
+			if (path_len == -1)
+			    break;
+
+			return path;
+		} while (0);
+		return strdup(XCURSORPATH_FALLBACK);
+	}
 	return path;
 }
 
