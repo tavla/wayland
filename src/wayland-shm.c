@@ -112,8 +112,9 @@ shm_pool_grow_mapping(struct wl_shm_pool *pool)
 #ifdef MREMAP_MAYMOVE
 	data = mremap(pool->data, pool->external_refcount ? 0 : pool->size, pool->new_size, MREMAP_MAYMOVE);
 #else
-	data = wl_os_mremap_maymove(pool->mmap_fd, pool->data, &pool->size, pool->new_size,
-								pool->mmap_prot, pool->mmap_flags, pool->external_refcount > 0);
+	data = wl_os_mremap_maymove(pool->mmap_fd, pool->data, &pool->size,
+								pool->new_size, pool->mmap_prot,
+								pool->mmap_flags, pool->external_refcount > 0);
 
 	if (pool->size != 0) {
 		wl_resource_post_error(pool->resource,
@@ -285,7 +286,7 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 	/*
 	 * keep track of previous mappings, we clean them up once the pool external_refcount drops to zero.
 	 */
-	if(pool->external_refcount && data != pool->data) {
+	if (pool->external_refcount && data != pool->data) {
 		mapping = malloc(sizeof(struct wl_shm_pool_mapping));
 		mapping->data = pool->data;
 		mapping->size = pool->size;
