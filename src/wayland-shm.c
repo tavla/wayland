@@ -295,8 +295,8 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 
 	if (data == MAP_FAILED) {
 		wl_resource_post_error(pool->resource,
-								WL_SHM_ERROR_INVALID_FD,
-								"failed mremap");
+				       WL_SHM_ERROR_INVALID_FD,
+				       "failed mremap");
 		return;
 	}
 
