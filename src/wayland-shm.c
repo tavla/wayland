@@ -113,8 +113,8 @@ shm_pool_grow_mapping(struct wl_shm_pool *pool)
 	data = mremap(pool->data, pool->external_refcount ? 0 : pool->size, pool->new_size, MREMAP_MAYMOVE);
 #else
 	data = wl_os_mremap_maymove(pool->mmap_fd, pool->data, &pool->size,
-								pool->new_size, pool->mmap_prot,
-								pool->mmap_flags, pool->external_refcount > 0);
+				    pool->new_size, pool->mmap_prot,
+				    pool->mmap_flags, pool->external_refcount > 0);
 
 	if (pool->size != 0) {
 		wl_resource_post_error(pool->resource,
