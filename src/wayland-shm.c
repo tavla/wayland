@@ -283,6 +283,13 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 
 	data = shm_pool_grow_mapping(pool);
 
+	if (data == MAP_FAILED) {
+		wl_resource_post_error(pool->resource,
+				       WL_SHM_ERROR_INVALID_FD,
+				       "failed mremap");
+		return;
+	}
+
 	/*
 	 * keep track of previous mappings, we clean them up once the pool external_refcount drops to zero.
 	 */
@@ -291,13 +298,6 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 		mapping->data = pool->data;
 		mapping->size = pool->size;
 		wl_list_insert(&pool->mappings, &mapping->link);
-	}
-
-	if (data == MAP_FAILED) {
-		wl_resource_post_error(pool->resource,
-				       WL_SHM_ERROR_INVALID_FD,
-				       "failed mremap");
-		return;
 	}
 
 	pool->data = data;
