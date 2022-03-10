@@ -116,6 +116,73 @@ struct wl_display {
 static int debug_client = 0;
 
 /**
+ * This helper function adjusts the closure arguments before they are logged.
+ * On the client, after the call to create_proxies(), NEW_ID arguments will
+ * point to a wl_proxy accessible via arg.o instead of being an int32
+ * accessible by arg.n, which is what wl_closure_print() attempts to print.
+ * This helper transforms the argument back into an id, so wl_closure_print()
+ * doesn't need to handle that as a special case.
+ *
+ * \param closure  closure to adjust
+ * \param send     if this is closure is for a request
+ *
+ */
+static void
+adjust_closure_args_for_logging(struct wl_closure *closure, bool send)
+{
+	int i;
+	struct argument_details arg;
+	const struct wl_proxy *proxy;
+	const char *signature = closure->message->signature;
+
+	// No adjustment needed for a send.
+	if (send)
+		return;
+
+	for (i = 0; i < closure->count; i++) {
+		signature = get_next_argument(signature, &arg);
+
+		switch (arg.type) {
+		case WL_ARG_NEW_ID:
+			proxy = (struct wl_proxy *)closure->args[i].o;
+			closure->args[i].n = proxy ? proxy->object.id : 0;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+/**
+ * This function helps log closures from the client, assuming logging is
+ * enabled.
+ *
+ * \param closure    closure for the message
+ * \param proxy      proxy for the message
+ * \param send       true if this is closure is for a request
+ * \param discarded  true if this is message is being discarded
+ * \param queue_name name for the queue for the message
+ *
+ */
+static void
+closure_log(struct wl_closure *closure, struct wl_proxy *proxy, bool send,
+	    bool discarded, const char *queue_name)
+{
+	struct wl_closure adjusted_closure = { 0 };
+
+	// Note: The real closure has extra data (referenced by its args
+	// immediately following the structure in memory, but we don't
+	// need to duplicate that.
+	memcpy(&adjusted_closure, closure, sizeof(struct wl_closure));
+
+	// Adjust the closure arguments.
+	adjust_closure_args_for_logging(&adjusted_closure, send);
+
+	wl_closure_print(&adjusted_closure, &proxy->object, send,
+			 discarded ? "" : NULL, queue_name);
+}
+
+/**
  * This helper function wakes up all threads that are
  * waiting for display->reader_cond (i. e. when reading is done,
  * canceled, or an error occurred)
@@ -931,8 +998,9 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 		if (queue)
 			queue_name = wl_event_queue_get_name(queue);
 
-		wl_closure_print(closure, &proxy->object, true, false, NULL,
-				 queue_name);
+		closure_log(closure, proxy, true, false,
+			    queue_name);
+
 	}
 
 	if (wl_closure_send(closure, proxy->display->connection)) {
@@ -1628,19 +1696,6 @@ queue_event(struct wl_display *display, int len)
 	return size;
 }
 
-static uint32_t
-id_from_object(union wl_argument *arg)
-{
-	struct wl_proxy *proxy;
-
-	if (arg->o) {
-		proxy = (struct wl_proxy *)arg->o;
-		return proxy->object.id;
-	}
-
-	return 0;
-}
-
 static void
 dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 {
@@ -1663,8 +1718,7 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 		bool discarded = proxy_destroyed ||
 				 !(proxy->dispatcher || proxy->object.implementation);
 
-		wl_closure_print(closure, &proxy->object, false, discarded,
-				 id_from_object, queue->name);
+		closure_log(closure, proxy, false, discarded, queue->name);
 	}
 
 	if (proxy_destroyed) {
