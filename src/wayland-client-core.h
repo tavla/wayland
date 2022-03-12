@@ -328,6 +328,9 @@ enum wl_client_message_discarded_reason {
 
 	/** The target had no listener or dispatcher */
 	WL_CLIENT_MESSAGE_DISCARD_NO_LISTENER_ON_DISPATCH,
+
+	/** The target was not valid when the event was demarshalled */
+	WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL,
 };
 
 /**

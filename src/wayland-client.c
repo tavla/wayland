@@ -180,6 +180,8 @@ get_discarded_reason_str(
 		return "dead proxy on dispatch";
 	case WL_CLIENT_MESSAGE_DISCARD_NO_LISTENER_ON_DISPATCH:
 		return "no listener on dispatch";
+	case WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL:
+		return "unknown id on demarshal";
 	}
 	return NULL;
 }
@@ -240,6 +242,53 @@ closure_log(struct wl_closure *closure, struct wl_proxy *proxy, bool send,
 			observer->func(observer->user_data, type, &message);
 		}
 	}
+}
+
+/**
+ * This function helps log unknown messages on the client, when logging is
+ * enabled.
+ *
+ * \param display    current display
+ * \param zombie     true if there was a zombie for the message target
+ * \param id         id of the proxy this message was meant for
+ * \param opcode     opcode from the message
+ * \param num_fds    number of fd arguments for this message
+ * \param num_bytes  byte size of this message
+ */
+static void
+log_unknown_message(struct wl_display *display, bool zombie, uint32_t id,
+		    int opcode, int num_fds, int num_bytes)
+{
+	char event_detail[100];
+	struct wl_interface unknown_interface = { 0 };
+	struct wl_proxy unknown_proxy = { 0 };
+	struct wl_message unknown_message = { 0 };
+	struct wl_closure unknown_closure = { 0 };
+
+	if (!debug_client && wl_list_empty(&display->observers))
+		return;
+
+	snprintf(event_detail, sizeof event_detail,
+		 "[event %d, %d fds, %d bytes]", opcode, num_fds, num_bytes);
+
+	unknown_interface.name = zombie ? "[zombie]" : "[unknown]";
+
+	unknown_proxy.object.interface = &unknown_interface;
+	unknown_proxy.object.id = id;
+	unknown_proxy.display = display;
+	unknown_proxy.refcount = -1;
+	unknown_proxy.flags = WL_PROXY_FLAG_WRAPPER;
+
+	unknown_message.name = event_detail;
+	unknown_message.signature = "";
+	unknown_message.types = NULL;
+
+	unknown_closure.message = &unknown_message;
+	unknown_closure.opcode = opcode;
+	unknown_closure.proxy = &unknown_proxy;
+
+	closure_log(&unknown_closure, &unknown_proxy, false,
+		    WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL, NULL);
 }
 
 /**
@@ -1678,8 +1727,6 @@ queue_event(struct wl_display *display, int len)
 	struct wl_closure *closure;
 	const struct wl_message *message;
 	struct wl_event_queue *queue;
-	struct timespec tp;
-	unsigned int time;
 	int num_zombie_fds;
 
 	wl_connection_copy(display->connection, p, sizeof p);
@@ -1697,17 +1744,9 @@ queue_event(struct wl_display *display, int len)
 		num_zombie_fds = (zombie && opcode < zombie->event_count) ?
 			zombie->fd_count[opcode] : 0;
 
-		if (debug_client) {
-			clock_gettime(CLOCK_REALTIME, &tp);
-			time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
+		log_unknown_message(display, !!zombie, id, opcode,
+				    num_zombie_fds, size);
 
-			fprintf(stderr, "[%7u.%03u] discarded [%s]#%d.[event %d]"
-				"(%d fd, %d byte)\n",
-				time / 1000, time % 1000,
-				zombie ? "zombie" : "unknown",
-				id, opcode,
-				num_zombie_fds, size);
-		}
 		if (num_zombie_fds > 0)
 			wl_connection_close_fds_in(display->connection,
 						   num_zombie_fds);

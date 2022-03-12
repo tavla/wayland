@@ -590,3 +590,260 @@ TEST(client_discards_if_no_listener_on_dispatch)
 
 	logger_teardown(&compositor, &client);
 }
+
+TEST(client_discards_if_invalid_id_on_demarshal)
+{
+	test_set_timeout(1);
+
+	struct expected_client_message client_messages[] = {
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_display",
+			.opcode = 0,
+			.message_name = "sync",
+			.args_count = 1,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_EVENT,
+			.discarded_reason =
+				WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL,
+			.queue_name = NULL,
+			.class = "[unknown]",
+			.opcode = 0,
+			.message_name = "[event 0, 0 fds, 12 bytes]",
+			.args_count = 0,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_EVENT,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Display Queue",
+			.class = "wl_display",
+			.opcode = 1,
+			.message_name = "delete_id",
+			.args_count = 1,
+		},
+	};
+	struct compositor compositor = { 0 };
+	struct client client = { 0 };
+
+	logger_setup(&compositor, &client);
+
+	compositor.expected_msg_count = 3;
+
+	client.expected_msg = &client_messages[0];
+	client.expected_msg_count = ARRAY_LENGTH(client_messages);
+
+	client.cb = wl_display_sync(client.display);
+	wl_display_flush(client.display);
+
+	while (compositor.actual_msg_count < compositor.expected_msg_count) {
+		wl_event_loop_dispatch(compositor.loop, -1);
+		wl_display_flush_clients(compositor.display);
+	}
+
+	// To get a WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL, we
+	// destroy the callback before reading and dispatching client events.
+	wl_callback_destroy(client.cb);
+
+	while (client.actual_msg_count < client.expected_msg_count) {
+		wl_display_dispatch(client.display);
+	}
+
+	logger_teardown(&compositor, &client);
+}
+
+static const struct wl_keyboard_interface keyboard_interface = { 0 };
+
+static void
+seat_get_pointer(struct wl_client *client, struct wl_resource *resource,
+		 uint32_t id)
+{
+	assert(false && "Not expected to be called by client.");
+}
+
+static void
+seat_get_keyboard(struct wl_client *client, struct wl_resource *resource,
+		  uint32_t id)
+{
+	struct wl_resource *keyboard_res;
+
+	keyboard_res =
+		wl_resource_create(client, &wl_keyboard_interface,
+				   wl_resource_get_version(resource), id);
+	wl_resource_set_implementation(keyboard_res, &keyboard_interface, NULL,
+				       NULL);
+
+	wl_keyboard_send_key(keyboard_res, 0, 0, 0, 0);
+}
+
+static void
+seat_get_touch(struct wl_client *client, struct wl_resource *resource,
+	       uint32_t id)
+{
+	assert(false && "Not expected to be called by client.");
+}
+
+static void
+seat_release(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static const struct wl_seat_interface seat_interface = {
+	&seat_get_pointer,
+	&seat_get_keyboard,
+	&seat_get_touch,
+	&seat_release,
+};
+
+static void
+bind_seat(struct wl_client *client, void *data, uint32_t vers, uint32_t id)
+{
+	struct wl_resource *seat_res;
+
+	seat_res = wl_resource_create(client, &wl_seat_interface, vers, id);
+	wl_resource_set_implementation(seat_res, &seat_interface, NULL, NULL);
+}
+
+static void
+registry_seat_listener_handle_global(void *data, struct wl_registry *registry,
+				     uint32_t id, const char *intf,
+				     uint32_t ver)
+{
+	uint32_t *seat_id_ptr = data;
+
+	if (strcmp(intf, wl_seat_interface.name) == 0) {
+		*seat_id_ptr = id;
+	}
+}
+
+static const struct wl_registry_listener registry_seat_listener = {
+	registry_seat_listener_handle_global, NULL
+};
+
+TEST(client_discards_if_zombie_on_demarshal)
+{
+	test_set_timeout(1);
+
+	struct expected_client_message client_messages[] = {
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_display",
+			.opcode = 1,
+			.message_name = "get_registry",
+			.args_count = 1,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_EVENT,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_registry",
+			.opcode = 0,
+			.message_name = "global",
+			.args_count = 3,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_registry",
+			.opcode = 0,
+			.message_name = "bind",
+			.args_count = 4,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_seat",
+			.opcode = 1,
+			.message_name = "get_keyboard",
+			.args_count = 1,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_keyboard",
+			.opcode = 0,
+			.message_name = "release",
+			.args_count = 0,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_REQUEST,
+			.discarded_reason = WL_CLIENT_MESSAGE_NOT_DISCARDED,
+			.queue_name = "Default Queue",
+			.class = "wl_seat",
+			.opcode = 3,
+			.message_name = "release",
+			.args_count = 0,
+		},
+		{
+			.type = WL_CLIENT_MESSAGE_EVENT,
+			.discarded_reason =
+				WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL,
+			.queue_name = NULL,
+			.class = "[zombie]",
+			.opcode = 3,
+			.message_name = "[event 3, 0 fds, 24 bytes]",
+			.args_count = 0,
+		},
+	};
+
+	struct compositor compositor = { 0 };
+	struct client client = { 0 };
+	struct wl_global *g_keyboard;
+	struct wl_registry *registry;
+	struct wl_seat *seat;
+	struct wl_keyboard *keyboard;
+	int32_t seat_id;
+
+	logger_setup(&compositor, &client);
+
+	client.expected_msg = &client_messages[0];
+	client.expected_msg_count = ARRAY_LENGTH(client_messages);
+
+	g_keyboard = wl_global_create(compositor.display, &wl_seat_interface,
+				      5, &compositor.display, bind_seat);
+
+	registry = wl_display_get_registry(client.display);
+	wl_registry_add_listener(registry, &registry_seat_listener, &seat_id);
+	wl_display_flush(client.display);
+
+	compositor.actual_msg_count = 0;
+	compositor.expected_msg_count = 2;
+
+	while (compositor.actual_msg_count < compositor.expected_msg_count) {
+		wl_event_loop_dispatch(compositor.loop, -1);
+		wl_display_flush_clients(compositor.display);
+	}
+
+	wl_display_dispatch(client.display);
+
+	seat = wl_registry_bind(registry, seat_id, &wl_seat_interface, 5);
+	keyboard = wl_seat_get_keyboard(seat);
+	wl_display_flush(client.display);
+
+	compositor.actual_msg_count = 0;
+	compositor.expected_msg_count = 3;
+
+	while (compositor.actual_msg_count < compositor.expected_msg_count) {
+		wl_event_loop_dispatch(compositor.loop, -1);
+		wl_display_flush_clients(compositor.display);
+	}
+
+	wl_keyboard_release(keyboard);
+	wl_seat_release(seat);
+
+	wl_display_dispatch(client.display);
+
+	wl_registry_destroy(registry);
+
+	wl_global_destroy(g_keyboard);
+
+	logger_teardown(&compositor, &client);
+}
