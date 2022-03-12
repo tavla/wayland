@@ -294,10 +294,11 @@ client_log_to_stderr_demo(void *user_data, enum wl_client_message_type type,
 			break;
 		case 'o':
 			if (args[i].o) {
-				// Note: server logger should instead cast to
-				// wl_resource, and use wl_resource_get_class
-				// and wl_resource_get_id.
-				arg_proxy = (struct wl_proxy *)(args[i].o);
+				// Note: server logger should instead use
+				// wl_resource_from_object, and then
+				// wl_resource_get_class and
+				// wl_resource_get_id.
+				arg_proxy = wl_proxy_from_object(args[i].o);
 				arg_class = wl_proxy_get_class(arg_proxy);
 
 				fprintf(f, "%s#%u",

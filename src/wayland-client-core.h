@@ -228,6 +228,9 @@ wl_proxy_set_queue(struct wl_proxy *proxy, struct wl_event_queue *queue);
 struct wl_event_queue *
 wl_proxy_get_queue(const struct wl_proxy *proxy);
 
+struct wl_proxy *
+wl_proxy_from_object(struct wl_object *object);
+
 const char *
 wl_event_queue_get_name(const struct wl_event_queue *queue);
 

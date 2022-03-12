@@ -2720,6 +2720,28 @@ wl_proxy_wrapper_destroy(void *proxy_wrapper)
 	free(wrapper);
 }
 
+/** Safely converts an object into its corresponding proxy
+ *
+ * \param object object to get the proxy for
+ * \return A corresponding proxy, or NULL on failure.
+ *
+ * Safely converts an object into its corresponding proxy.
+ *
+ * This is useful for implementing functions that are given a \c wl_argument
+ * array, and that need to do further introspection on the ".o" field, as it
+ * is otherwise an opaque type.
+ *
+ * \memberof wl_proxy
+ */
+WL_EXPORT struct wl_proxy *
+wl_proxy_from_object(struct wl_object *object)
+{
+	struct wl_proxy *proxy;
+	if (object == NULL)
+		return NULL;
+	return wl_container_of(object, proxy, object);
+}
+
 WL_EXPORT void
 wl_log_set_handler_client(wl_log_func_t handler)
 {
