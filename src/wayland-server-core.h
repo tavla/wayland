@@ -628,6 +628,9 @@ struct wl_listener *
 wl_resource_get_destroy_listener(struct wl_resource *resource,
 				 wl_notify_func_t notify);
 
+struct wl_resource *
+wl_resource_from_object(struct wl_object *object);
+
 #define wl_resource_for_each(resource, list)					\
 	for (resource = 0, resource = wl_resource_from_link((list)->next);	\
 	     wl_resource_get_link(resource) != (list);				\
