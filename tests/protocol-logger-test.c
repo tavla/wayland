@@ -81,6 +81,7 @@ struct client {
 	struct wl_display *display;
 	struct wl_callback *cb;
 	struct wl_client_observer *sequence_observer;
+	struct wl_client_observer *stderr_logger;
 
 	struct expected_client_message *expected_msg;
 	int expected_msg_count;
@@ -206,6 +207,133 @@ client_sequence_observer_func(
 		  "arg count mismatch: %s", details_msg);
 }
 
+// A slightly simplified version of get_next_argument() from src/connection.c
+static const char *
+get_next_argument_type(const char *signature, char *type)
+{
+	for (; *signature; ++signature) {
+		assert(strchr("iufsonah?", *signature) != NULL);
+		switch (*signature) {
+		case 'i':
+		case 'u':
+		case 'f':
+		case 's':
+		case 'o':
+		case 'n':
+		case 'a':
+		case 'h':
+			*type = *signature;
+			return signature + 1;
+		case '?':
+			break;
+		}
+	}
+	*type = 0;
+	return signature;
+}
+
+// This duplicates what the internal wl_closure_print function does, and can be
+// used as a starting point for a client or server that wants to log messages.
+static void
+client_log_to_stderr_demo(void *user_data, enum wl_client_message_type type,
+			  const struct wl_client_observed_message *message)
+{
+	int i;
+	char arg_type;
+	const char *signature = message->message->signature;
+	const union wl_argument *args = message->arguments;
+	struct wl_proxy *arg_proxy;
+	const char *arg_class;
+	struct timespec tp;
+	unsigned int time;
+	FILE *f;
+	char *buffer;
+	size_t buffer_length;
+
+	f = open_memstream(&buffer, &buffer_length);
+	if (f == NULL)
+		return;
+
+	clock_gettime(CLOCK_REALTIME, &tp);
+	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
+
+	// Note: server logger will be given message->resource, and should
+	// use wl_resource_get_class and wl_resource_get_id.
+	fprintf(f, "[%7u.%03u] %s%s%s%s%s%s%s%s#%u.%s(", time / 1000, time % 1000,
+		(message->queue_name != NULL) ? "{" : "",
+		(message->queue_name != NULL) ? message->queue_name : "",
+		(message->queue_name != NULL) ? "} " : "",
+		(message->discarded_reason_str ? "discarded[" : ""),
+		(message->discarded_reason_str ? message->discarded_reason_str
+					       : ""),
+		(message->discarded_reason_str ? "] " : ""),
+		(type == WL_CLIENT_MESSAGE_REQUEST) ? " -> " : "",
+		wl_proxy_get_class(message->proxy),
+		wl_proxy_get_id(message->proxy), message->message->name);
+
+	for (i = 0; i < message->arguments_count; i++) {
+		signature = get_next_argument_type(signature, &arg_type);
+		if (i > 0)
+			fprintf(f, ", ");
+
+		switch (arg_type) {
+		case 'u':
+			fprintf(f, "%u", args[i].u);
+			break;
+		case 'i':
+			fprintf(f, "%d", args[i].i);
+			break;
+		case 'f':
+			fprintf(f, "%f", wl_fixed_to_double(args[i].f));
+			break;
+		case 's':
+			if (args[i].s)
+				fprintf(f, "\"%s\"", args[i].s);
+			else
+				fprintf(f, "nil");
+			break;
+		case 'o':
+			if (args[i].o) {
+				// Note: server logger should instead cast to
+				// wl_resource, and use wl_resource_get_class
+				// and wl_resource_get_id.
+				arg_proxy = (struct wl_proxy *)(args[i].o);
+				arg_class = wl_proxy_get_class(arg_proxy);
+
+				fprintf(f, "%s#%u",
+					arg_class ? arg_class : "[unknown]",
+					wl_proxy_get_id(arg_proxy));
+			} else {
+				fprintf(f, "nil");
+			}
+			break;
+		case 'n':
+			fprintf(f, "new id %s#",
+				(message->message->types[i])
+					? message->message->types[i]->name
+					: "[unknown]");
+			if (args[i].n != 0)
+				fprintf(f, "%u", args[i].n);
+			else
+				fprintf(f, "nil");
+			break;
+		case 'a':
+			fprintf(f, "array");
+			break;
+		case 'h':
+			fprintf(f, "fd %d", args[i].h);
+			break;
+		}
+	}
+
+	fprintf(f, ")\n");
+
+	if (fclose(f) == 0) {
+		fprintf(stderr, "%s", buffer);
+		free(buffer);
+	}
+}
+
 static void
 callback_done(void *data, struct wl_callback *cb, uint32_t time)
 {
@@ -234,12 +362,15 @@ logger_setup(struct compositor *compositor, struct client *client)
 	client->display = wl_display_connect(socket);
 	client->sequence_observer = wl_display_create_client_observer(
 		client->display, client_sequence_observer_func, client);
+	client->stderr_logger = wl_display_create_client_observer(
+		client->display, client_log_to_stderr_demo, client);
 }
 
 static void
 logger_teardown(struct compositor *compositor, struct client *client)
 {
 	wl_client_observer_destroy(client->sequence_observer);
+	wl_client_observer_destroy(client->stderr_logger);
 	wl_display_disconnect(client->display);
 
 	wl_client_destroy(compositor->client);
