@@ -58,6 +58,12 @@ static pthread_once_t wl_shm_sigbus_once = PTHREAD_ONCE_INIT;
 static pthread_key_t wl_shm_sigbus_data_key;
 static struct sigaction wl_shm_old_sigbus_action;
 
+struct wl_shm_pool_mapping {
+	struct wl_list link;
+	char *data;
+	int32_t size;
+};
+
 struct wl_shm_pool {
 	struct wl_resource *resource;
 	int internal_refcount;
@@ -72,6 +78,8 @@ struct wl_shm_pool {
 	int mmap_prot;
 #endif
 	bool sigbus_is_impossible;
+	/* list of struct wl_shm_pool_mapping */
+	struct wl_list mappings;
 };
 
 /** \class wl_shm_buffer
@@ -104,11 +112,12 @@ shm_pool_grow_mapping(struct wl_shm_pool *pool)
 	void *data;
 
 #ifdef MREMAP_MAYMOVE
-	data = mremap(pool->data, pool->size, pool->new_size, MREMAP_MAYMOVE);
+	data = mremap(pool->data, pool->external_refcount ? 0 : pool->size, pool->new_size, MREMAP_MAYMOVE);
 #else
 	data = wl_os_mremap_maymove(pool->mmap_fd, pool->data, &pool->size,
 				    pool->new_size, pool->mmap_prot,
-				    pool->mmap_flags);
+				    pool->mmap_flags, pool->external_refcount > 0);
+
 	if (pool->size != 0) {
 		wl_resource_post_error(pool->resource,
 				       WL_SHM_ERROR_INVALID_FD,
@@ -119,33 +128,20 @@ shm_pool_grow_mapping(struct wl_shm_pool *pool)
 }
 
 static void
-shm_pool_finish_resize(struct wl_shm_pool *pool)
-{
-	void *data;
-
-	if (pool->size == pool->new_size)
-		return;
-
-	data = shm_pool_grow_mapping(pool);
-	if (data == MAP_FAILED) {
-		wl_resource_post_error(pool->resource,
-				       WL_SHM_ERROR_INVALID_FD,
-				       "failed mremap");
-		return;
-	}
-
-	pool->data = data;
-	pool->size = pool->new_size;
-}
-
-static void
 shm_pool_unref(struct wl_shm_pool *pool, bool external)
 {
+	struct wl_shm_pool_mapping *mapping, *tmp_mapping;
 	if (external) {
 		pool->external_refcount--;
 		assert(pool->external_refcount >= 0);
-		if (pool->external_refcount == 0)
-			shm_pool_finish_resize(pool);
+		if (pool->external_refcount == 0) {
+			wl_list_for_each_safe(mapping, tmp_mapping, &pool->mappings, link) {
+				munmap(mapping->data, mapping->size);
+				wl_list_remove(&mapping->link);
+				free(mapping);
+			}
+			wl_list_init(&pool->mappings);
+		}
 	} else {
 		pool->internal_refcount--;
 		assert(pool->internal_refcount >= 0);
@@ -274,6 +270,8 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 		int32_t size)
 {
 	struct wl_shm_pool *pool = wl_resource_get_user_data(resource);
+	struct wl_shm_pool_mapping *mapping;
+	void *data;
 
 	if (size < pool->size) {
 		wl_resource_post_error(resource,
@@ -284,13 +282,30 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 
 	pool->new_size = size;
 
-	/* If the compositor has taken references on this pool it
-	 * may be caching pointers into it. In that case we
-	 * defer the resize (which may move the entire mapping)
-	 * until the compositor finishes dereferencing the pool.
+	if (pool->size == pool->new_size)
+		return;
+
+	data = shm_pool_grow_mapping(pool);
+
+	if (data == MAP_FAILED) {
+		wl_resource_post_error(pool->resource,
+				       WL_SHM_ERROR_INVALID_FD,
+				       "failed mremap");
+		return;
+	}
+
+	/*
+	 * keep track of previous mappings, we clean them up once the pool external_refcount drops to zero.
 	 */
-	if (pool->external_refcount == 0)
-		shm_pool_finish_resize(pool);
+	if (pool->external_refcount && data != pool->data) {
+		mapping = malloc(sizeof(struct wl_shm_pool_mapping));
+		mapping->data = pool->data;
+		mapping->size = pool->size;
+		wl_list_insert(&pool->mappings, &mapping->link);
+	}
+
+	pool->data = data;
+	pool->size = pool->new_size;
 }
 
 static const struct wl_shm_pool_interface shm_pool_interface = {
@@ -364,6 +379,7 @@ shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 		free(pool);
 		return;
 	}
+	wl_list_init(&pool->mappings);
 
 	wl_resource_set_implementation(pool->resource,
 				       &shm_pool_interface,

@@ -49,7 +49,7 @@ wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 
 void *
 wl_os_mremap_maymove(int fd, void *old_data, ssize_t *old_size,
-		     ssize_t new_size, int prot, int flags);
+		     ssize_t new_size, int prot, int flags, int keep_mapping);
 
 
 /*
