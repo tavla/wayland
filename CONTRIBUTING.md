@@ -139,8 +139,9 @@ try to follow the rules below.
 - no braces in an if-body with just one statement;
 - if one of the branches of an if-else condition has braces, then the
   other branch should also have braces;
-- there is always an empty line between variable declarations and the
-  code;
+- there is always an empty line between initial variable declarations and
+  the code;
+- variable declarations may be interspersed with code
 
 ```c
 static int
