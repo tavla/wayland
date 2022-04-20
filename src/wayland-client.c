@@ -240,14 +240,12 @@ wl_proxy_unref(struct wl_proxy *proxy)
 static void
 validate_closure_objects(struct wl_closure *closure)
 {
-	const char *signature;
-	struct argument_details arg;
-	int i, count;
-	struct wl_proxy *proxy;
+	const char *signature = closure->message->signature;
+	int count = arg_count_for_signature(signature);
+	for (int i = 0; i < count; i++) {
+		struct wl_proxy *proxy;
+		struct argument_details arg;
 
-	signature = closure->message->signature;
-	count = arg_count_for_signature(signature);
-	for (i = 0; i < count; i++) {
 		signature = get_next_argument(signature, &arg);
 		switch (arg.type) {
 		case 'n':
@@ -268,14 +266,13 @@ validate_closure_objects(struct wl_closure *closure)
 static void
 destroy_queued_closure(struct wl_closure *closure)
 {
-	const char *signature;
-	struct argument_details arg;
-	struct wl_proxy *proxy;
-	int i, count;
+	const char *signature = closure->message->signature;
+	int count = arg_count_for_signature(signature);
 
-	signature = closure->message->signature;
-	count = arg_count_for_signature(signature);
-	for (i = 0; i < count; i++) {
+	for (int i = 0; i < count; i++) {
+		struct wl_proxy *proxy;
+		struct argument_details arg;
+
 		signature = get_next_argument(signature, &arg);
 		switch (arg.type) {
 		case 'n':
@@ -355,11 +352,11 @@ wl_display_create_queue(struct wl_display *display)
 static int
 message_count_fds(const char *signature)
 {
-	unsigned int count, i, fds = 0;
-	struct argument_details arg;
+	unsigned int fds = 0;
 
-	count = arg_count_for_signature(signature);
-	for (i = 0; i < count; i++) {
+	unsigned int count = arg_count_for_signature(signature);
+	for (unsigned int i = 0; i < count; i++) {
+		struct argument_details arg;
 		signature = get_next_argument(signature, &arg);
 		if (arg.type == 'h')
 			fds++;
@@ -826,14 +823,13 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 			     const struct wl_interface *interface, uint32_t version,
 			     uint32_t flags, union wl_argument *args)
 {
-	struct wl_closure *closure;
 	struct wl_proxy *new_proxy = NULL;
-	const struct wl_message *message;
 	struct wl_display *disp = proxy->display;
 
 	pthread_mutex_lock(&disp->mutex);
 
-	message = &proxy->object.interface->methods[opcode];
+	const struct wl_message *message =
+		&proxy->object.interface->methods[opcode];
 	if (interface) {
 		new_proxy = create_outgoing_proxy(proxy, message,
 						  args, interface,
@@ -846,7 +842,8 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 		goto err_unlock;
 	}
 
-	closure = wl_closure_marshal(&proxy->object, opcode, args, message);
+	struct wl_closure *closure =
+		wl_closure_marshal(&proxy->object, opcode, args, message);
 	if (closure == NULL) {
 		wl_log("Error marshalling request: %s\n", strerror(errno));
 		display_fatal_error(proxy->display, errno);
@@ -1034,11 +1031,9 @@ display_handle_error(void *data,
 static void
 display_handle_delete_id(void *data, struct wl_display *display, uint32_t id)
 {
-	struct wl_proxy *proxy;
-
 	pthread_mutex_lock(&display->mutex);
 
-	proxy = wl_map_lookup(&display->objects, id);
+	struct wl_proxy *proxy = wl_map_lookup(&display->objects, id);
 
 	if (wl_object_is_zombie(&display->objects, id)) {
 		/* For zombie objects, the 'proxy' is actually the zombie
