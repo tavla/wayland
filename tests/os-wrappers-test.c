@@ -143,10 +143,12 @@ recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
 	wrapped_calls_recvmsg++;
 
+#if !(HAVE_BROKEN_MSG_CMSG_CLOEXEC)
 	if (fall_back && (flags & MSG_CMSG_CLOEXEC)) {
 		errno = EINVAL;
 		return -1;
 	}
+#endif
 
 	return real_recvmsg(sockfd, msg, flags);
 }
@@ -225,7 +227,9 @@ do_os_wrappers_dupfd_cloexec(int n)
 	 * Must have 4 calls if falling back, but must also allow
 	 * falling back without a forced fallback.
 	 */
+#if !(HAVE_BROKEN_MSG_CMSG_CLOEXEC)
 	assert(wrapped_calls_fcntl > n);
+#endif
 
 	exec_fd_leak_check(nr_fds);
 }
