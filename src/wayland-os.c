@@ -69,14 +69,36 @@ wl_os_socket_cloexec(int domain, int type, int protocol)
 {
 	int fd;
 
+#ifdef SOCK_CLOEXEC
 	fd = socket(domain, type | SOCK_CLOEXEC, protocol);
 	if (fd >= 0)
 		return fd;
 	if (errno != EINVAL)
 		return -1;
+#endif
 
 	fd = socket(domain, type, protocol);
 	return set_cloexec_or_close(fd);
+}
+
+int
+wl_os_socketpair_cloexec(int domain, int type, int protocol, int sv[2])
+{
+	int retval;
+
+#ifdef SOCK_CLOEXEC
+	retval = socketpair(domain, type | SOCK_CLOEXEC, protocol, sv);
+	if (retval >= 0)
+		return retval;
+	if (errno != EINVAL)
+		return -1;
+#endif
+
+	retval = socketpair(domain, type, protocol, sv);
+	if (set_cloexec_or_close(sv[0]) == -1 || set_cloexec_or_close(sv[1]) == -1)
+		retval = -1;
+
+	return retval;
 }
 
 #if defined(__FreeBSD__)
