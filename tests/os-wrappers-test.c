@@ -63,6 +63,14 @@ static int fall_back;
  * __interceptor_ and check at run time if they linked to anything or not.
 */
 
+#ifdef __APPLE__
+#define DECL(ret_type, func, ...) \
+	static ret_type (*real_ ## func)(__VA_ARGS__);			\
+	static int wrapped_calls_ ## func;
+
+#define REAL(func) \
+    (__typeof__(real_ ## func))dlsym(RTLD_NEXT, #func)
+#else
 #define DECL(ret_type, func, ...) \
 	ret_type __interceptor_ ## func(__VA_ARGS__) __attribute__((weak)); \
 	static ret_type (*real_ ## func)(__VA_ARGS__);			\
@@ -71,6 +79,7 @@ static int fall_back;
 #define REAL(func) (__interceptor_ ## func) ?				\
 	__interceptor_ ## func :					\
 	(__typeof__(&__interceptor_ ## func))dlsym(RTLD_NEXT, #func)
+#endif
 
 DECL(int, socket, int, int, int);
 DECL(int, fcntl, int, int, ...);

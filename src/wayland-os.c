@@ -101,7 +101,7 @@ wl_os_socketpair_cloexec(int domain, int type, int protocol, int sv[2])
 	return retval;
 }
 
-#if defined(__FreeBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 int
 wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 {
