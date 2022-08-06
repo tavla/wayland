@@ -100,7 +100,25 @@ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 #endif
 	return 0;
 }
-#elif defined(SO_PEERCRED)
+#elif defined(LOCAL_CREDS) /* NetBSD */
+#ifndef SOL_LOCAL /* Before NetBSD 10.0, SOL_LOCAL isn't defined */
+#define SOL_LOCAL (0)
+#endif
+int
+wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
+{
+	socklen_t len;
+	struct sockcred ucred;
+
+	len = sizeof(ucred);
+	if (getsockopt(sockfd, SOL_LOCAL, LOCAL_CREDS, &ucred, &len) < 0)
+		return -1;
+	*uid = ucred.sc_uid;
+	*gid = ucred.sc_gid;
+	*pid = ucred.sc_pid;
+	return 0;
+}
+#elif defined(SO_PEERCRED) /* Linux */
 int
 wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 {
