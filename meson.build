@@ -19,6 +19,9 @@ cc_args = []
 if host_machine.system() != 'freebsd'
 	cc_args += ['-D_POSIX_C_SOURCE=200809L']
 endif
+if host_machine.system() == 'netbsd'
+	cc_args += ['-D_NETBSD_SOURCE']
+endif
 add_project_arguments(cc_args, language: 'c')
 
 compiler_flags = [
@@ -41,12 +44,16 @@ endforeach
 have_funcs = [
 	'accept4',
 	'mkostemp',
-	'posix_fallocate',
 	'prctl',
 	'memfd_create',
 	'mremap',
 	'strndup',
 ]
+# NetBSD defines posix_fallocate(), but it's unimplemented for most file
+# systems as of NetBSD 9.
+if host_machine.system() != 'netbsd'
+	have_funcs += [ 'posix_fallocate' ]
+endif
 foreach f: have_funcs
 	config_h.set('HAVE_' + f.underscorify().to_upper(), cc.has_function(f))
 endforeach
@@ -69,8 +76,8 @@ endif
 config_h.set10('HAVE_BROKEN_MSG_CMSG_CLOEXEC', have_broken_msg_cmsg_cloexec)
 
 if get_option('libraries')
-	if host_machine.system() == 'freebsd'
-		# When building for FreeBSD, epoll(7) is provided by a userspace
+	if cc.has_function('kqueue', prefix: '#include <sys/event.h>')
+		# When building for BSD, epoll(7) is provided by a userspace
 		# wrapper around kqueue(2).
 		epoll_dep = dependency('epoll-shim')
 	else
