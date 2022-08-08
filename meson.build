@@ -44,16 +44,12 @@ endforeach
 have_funcs = [
 	'accept4',
 	'mkostemp',
+	'posix_fallocate',
 	'prctl',
 	'memfd_create',
 	'mremap',
 	'strndup',
 ]
-# NetBSD defines posix_fallocate(), but it's unimplemented for most file
-# systems as of NetBSD 9.
-if host_machine.system() != 'netbsd'
-	have_funcs += [ 'posix_fallocate' ]
-endif
 foreach f: have_funcs
 	config_h.set('HAVE_' + f.underscorify().to_upper(), cc.has_function(f))
 endforeach
