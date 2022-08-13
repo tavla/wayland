@@ -138,6 +138,16 @@ wl_array_add(struct wl_array *array, size_t size)
 	return p;
 }
 
+WL_EXPORT void
+wl_array_remove_at(struct wl_array *array, size_t offset, size_t size) {
+    if (array->size < offset + size)
+        wl_abort("Cannot remove data: array of size %zu is smaller than %zu", array->size, offset+size);
+
+    char *data = array->data;
+    memmove(&data[offset], &data[offset+size], array->size - offset - size);
+    array->size -= size;
+}
+
 WL_EXPORT int
 wl_array_copy(struct wl_array *array, struct wl_array *source)
 {
