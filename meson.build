@@ -16,7 +16,7 @@ config_h.set_quoted('PACKAGE', meson.project_name())
 config_h.set_quoted('PACKAGE_VERSION', meson.project_version())
 
 cc_args = []
-if not host_machine.system().contains('bsd')
+if host_machine.system() == 'linux'
 	cc_args += ['-D_POSIX_C_SOURCE=200809L']
 endif
 add_project_arguments(cc_args, language: 'c')
