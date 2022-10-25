@@ -2037,6 +2037,7 @@ int main(int argc, char *argv[])
 	bool strict = false;
 	bool fail = false;
 	int opt;
+	int io_err;
 	enum {
 		CLIENT_HEADER,
 		SERVER_HEADER,
@@ -2205,7 +2206,10 @@ int main(int argc, char *argv[])
 	}
 
 	free_protocol(&protocol);
-	fclose(input);
+	io_err = fflush(NULL) || ferror(stdout) || ferror(input);
+	if (io_err)
+		fprintf(stderr, "I/O error during processing\n");
 
-	return 0;
+	fclose(input);
+	return io_err;
 }
