@@ -2205,7 +2205,12 @@ int main(int argc, char *argv[])
 	}
 
 	free_protocol(&protocol);
-	fclose(input);
+	fflush(stdout);
+	fflush(stderr);
+	opt = ferror(stdout) || ferror(stderr) || ferror(input);
+	if (opt)
+		fprintf(stderr, "I/O error during processing\n");
 
-	return 0;
+	fclose(input);
+	return opt;
 }
