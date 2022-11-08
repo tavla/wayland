@@ -380,7 +380,7 @@ desc_dump(char *desc, const char *fmt, ...)
 	putchar('\n');
 }
 
-static void __attribute__ ((noreturn))
+static void __attribute__((format(printf, 2, 3), noreturn))
 fail(struct location *loc, const char *msg, ...)
 {
 	va_list ap;
@@ -394,7 +394,7 @@ fail(struct location *loc, const char *msg, ...)
 	exit(EXIT_FAILURE);
 }
 
-static void
+static void __attribute__((format(printf, 2, 3)))
 warn(struct location *loc, const char *msg, ...)
 {
 	va_list ap;
@@ -836,7 +836,7 @@ start_element(void *data, const char *element_name, const char **atts)
 		switch (arg->type) {
 		case NEW_ID:
 			ctx->message->new_id_count++;
-			/* fallthrough */
+			__attribute__((fallthrough));
 		case OBJECT:
 			if (interface_name) {
 				validate_identifier(&ctx->loc,
