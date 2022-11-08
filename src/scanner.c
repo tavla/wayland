@@ -129,7 +129,7 @@ is_dtd_valid(FILE *input, const char *filename)
 	doc = xmlCtxtReadFd(ctx, fd, filename, NULL, 0);
 	if (!doc) {
 		fprintf(stderr, "Failed to read XML\n");
-		abort();
+		exit(EXIT_FAILURE);
 	}
 
 	rc = xmlValidateDtd(dtdctx, doc, dtd);
@@ -141,7 +141,7 @@ is_dtd_valid(FILE *input, const char *filename)
 
 	if (lseek(fd, 0, SEEK_SET) != 0) {
 		fprintf(stderr, "Failed to reset fd, output would be garbage.\n");
-		abort();
+		exit(EXIT_FAILURE);
 	}
 #endif
 	return rc;
