@@ -742,29 +742,30 @@ start_element(void *data, const char *element_name, const char **atts)
 	for (i = 0; atts[i]; i += 2) {
 		if (strcmp(atts[i], "name") == 0)
 			name = atts[i + 1];
-		if (strcmp(atts[i], "version") == 0) {
+		else if (strcmp(atts[i], "version") == 0) {
 			version = strtouint(atts[i + 1]);
 			if (version == -1)
 				fail(&ctx->loc, "wrong version (%s)", atts[i + 1]);
-		}
-		if (strcmp(atts[i], "type") == 0)
+		} else if (strcmp(atts[i], "type") == 0)
 			type = atts[i + 1];
-		if (strcmp(atts[i], "value") == 0)
+		else if (strcmp(atts[i], "value") == 0)
 			value = atts[i + 1];
-		if (strcmp(atts[i], "interface") == 0)
+		else if (strcmp(atts[i], "interface") == 0)
 			interface_name = atts[i + 1];
-		if (strcmp(atts[i], "summary") == 0)
+		else if (strcmp(atts[i], "summary") == 0)
 			summary = atts[i + 1];
-		if (strcmp(atts[i], "since") == 0)
+		else if (strcmp(atts[i], "since") == 0)
 			since = atts[i + 1];
-		if (strcmp(atts[i], "deprecated-since") == 0)
+		else if (strcmp(atts[i], "deprecated-since") == 0)
 			deprecated_since = atts[i + 1];
-		if (strcmp(atts[i], "allow-null") == 0)
+		else if (strcmp(atts[i], "allow-null") == 0)
 			allow_null = atts[i + 1];
-		if (strcmp(atts[i], "enum") == 0)
+		else if (strcmp(atts[i], "enum") == 0)
 			enumeration_name = atts[i + 1];
-		if (strcmp(atts[i], "bitfield") == 0)
+		else if (strcmp(atts[i], "bitfield") == 0)
 			bitfield = atts[i + 1];
+		else
+			fail(&ctx->loc, "invalid attribute name (%s)", atts[i]);
 	}
 
 	ctx->character_data_length = 0;
