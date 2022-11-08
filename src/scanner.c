@@ -616,20 +616,26 @@ strtouint(const char *str)
 {
 	long int ret;
 	char *end;
-	int prev_errno = errno;
+	int prev_errno;
 
+	if (str[0] == '0')
+		return str[1] ? -1 : 0;
+	if (str[0] < '1' || str[0] > '9')
+		return -1;
+
+	prev_errno = errno;
 	errno = 0;
 	ret = strtol(str, &end, 10);
-	if (errno != 0 || end == str || *end != '\0')
-		return -1;
-
-	/* check range */
-	if (ret < 0 || ret > INT_MAX) {
+	if (errno != 0 || end == str || *end != '\0') {
+		errno = prev_errno;
 		return -1;
 	}
-
 	errno = prev_errno;
-	return (int)ret;
+
+	if (ret <= 0)
+		abort(); /* caught by syntax checks */
+
+	return ret > INT_MAX ? -1 : ret;
 }
 
 /* Check that the provided string will produce valid "C" identifiers.
