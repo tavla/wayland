@@ -784,6 +784,9 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (version == 0)
 			fail(&ctx->loc, "no interface version given");
 
+		if (atts[4])
+			fail(&ctx->loc, "unexpected attribute on interface");
+
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		interface = create_interface(ctx->loc, name, version);
 		ctx->interface = interface;
@@ -924,6 +927,9 @@ start_element(void *data, const char *element_name, const char **atts)
 	} else if (strcmp(element_name, "description") == 0) {
 		if (summary == NULL)
 			fail(&ctx->loc, "description without summary");
+		/* must be valid since summary attribute present */
+		if (atts[2])
+			fail(&ctx->loc, "description with non-summary attribute");
 
 		description = xzalloc(sizeof *description);
 		description->summary = xstrdup(summary);
@@ -939,6 +945,8 @@ start_element(void *data, const char *element_name, const char **atts)
 		else
 			ctx->protocol->description = description;
 		ctx->description = description;
+	} else {
+		fail(&ctx->loc, "unknown element %s", element_name);
 	}
 }
 
