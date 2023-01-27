@@ -190,7 +190,7 @@
     </event>
   </interface>
 
-  <interface name="wl_compositor" version="5">
+  <interface name="wl_compositor" version="6">
     <description summary="the compositor singleton">
       A compositor.  This object is a singleton global.  The
       compositor is in charge of combining the contents of multiple
@@ -1358,7 +1358,7 @@
     </event>
   </interface>
 
-  <interface name="wl_surface" version="5">
+  <interface name="wl_surface" version="6">
     <description summary="an onscreen surface">
       A surface is a rectangular area that may be displayed on zero
       or more outputs, and shown any number of times at the compositor's
@@ -1644,6 +1644,9 @@
 	output.
 
 	Note that a surface may be overlapping with zero or more outputs.
+
+	This event is a part of a wl_surface configuration sequence, see
+	wl_surface.configure.
       </description>
       <arg name="output" type="object" interface="wl_output" summary="output entered by the surface"/>
     </event>
@@ -1659,6 +1662,9 @@
 	has been sent, and the compositor might expect new surface content
 	updates even if no enter event has been sent. The frame event should be
 	used instead.
+
+	This event is a part of a wl_surface configuration sequence, see
+	wl_surface.configure.
       </description>
       <arg name="output" type="object" interface="wl_output" summary="output left by the surface"/>
     </event>
@@ -1795,6 +1801,26 @@
       <arg name="x" type="int" summary="surface-local x coordinate"/>
       <arg name="y" type="int" summary="surface-local y coordinate"/>
     </request>
+
+    <!-- Version 6 additions -->
+
+    <event name="configure" since="6">
+      <description summary="end of a surface configuration sequence">
+	The configure event marks the end of a wl_surface configuration
+	sequence. A wl_surface configuration sequence is a set of zero or more
+	events configuring the state of the surface. A wl_surface configuration
+	sequence is started by any event (of any interface) specified to be a
+	part of a wl_surface configuration sequence, and includes any other
+	events specified similarly until the end of the sequence. Clients should
+	wait to receive the whole sequence before they start applying changes to
+	their surfaces.
+
+	Any event that is specified to be a part of wl_surface configuration
+	sequence guarantees that a wl_surface.configure event will follow after
+	all state events for the same sequence have been sent, provided that the
+	negotiated wl_surface interface version is 6 or greater.
+      </description>
+    </event>
    </interface>
 
   <interface name="wl_seat" version="8">
@@ -2936,6 +2962,9 @@
       .place_below). This state is applied when the parent surface's
       wl_surface state is applied, regardless of the sub-surface's mode.
       As the exception, set_sync and set_desync are effective immediately.
+
+      Compositors must always send a wl_surface.configure event on the parent
+      after sending a wl_surface.configure event on the sub-surface.
 
       The main surface can be thought to be always in desynchronized mode,
       since it does not have a parent in the sub-surfaces sense.
