@@ -96,11 +96,15 @@ if get_option('libraries')
 		endif
 	endforeach
 
-	rt_dep = []
-	if not cc.has_function('clock_gettime', prefix: '#include <time.h>')
-		rt_dep = cc.find_library('rt')
-		if not cc.has_function('clock_gettime', prefix: '#include <time.h>', dependencies: rt_dep, args: cc_args)
-			error('clock_gettime not found')
+	if host_machine.system() == 'darwin'
+		rt_dep = []
+	else
+		rt_dep = []
+		if cc.has_function('clock_gettime', prefix: '#include <time.h>')
+			rt_dep = cc.find_library('rt')
+			if not cc.has_function('clock_gettime', prefix: '#include <time.h>', dependencies: rt_dep, args: cc_args)
+				error('clock_gettime not found')
+			endif
 		endif
 	endif
 endif
