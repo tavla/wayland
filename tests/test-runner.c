@@ -308,6 +308,12 @@ is_debugger_attached(void)
 
 	return rc;
 }
+#else
+static int
+is_debugger_attached(void)
+{
+	return 0;
+}
 #endif
 
 int main(int argc, char *argv[])
