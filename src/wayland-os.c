@@ -115,6 +115,22 @@ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 	*pid = ucred.pid;
 	return 0;
 }
+#elif defined(HAVE_GETPEEREID) && defined(LOCAL_PEERPID)
+int
+wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
+{
+	socklen_t len;
+
+	if (getpeereid(sockfd, uid, gid) != 0) {
+		return -1;
+	}
+
+	len = sizeof(pid_t);
+	if (getsockopt(sockfd, SOL_LOCAL, LOCAL_PEERPID, pid, &len) != 0) {
+		return -1;
+	}
+	return 0;
+}
 #else
 #error "Don't know how to read ucred on this platform"
 #endif
