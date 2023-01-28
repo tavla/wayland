@@ -19,6 +19,10 @@ cc_args = []
 if host_machine.system() != 'freebsd'
 	cc_args += ['-D_POSIX_C_SOURCE=200809L']
 endif
+if host_machine.system() == 'darwin'
+	# For CMSG_LEN(), which is an RFC 2292 addition and not part of POSIX.1-2008
+	cc_args += ['-D_DARWIN_C_SOURCE']
+endif
 add_project_arguments(cc_args, language: 'c')
 
 compiler_flags = [
