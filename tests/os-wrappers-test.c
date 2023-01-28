@@ -47,6 +47,7 @@
 
 static int fall_back;
 
+#ifdef __ELF__
 /* Play nice with sanitizers
  *
  * Sanitizers need to intercept syscalls in the compiler run-time library. As
@@ -71,6 +72,13 @@ static int fall_back;
 #define REAL(func) (__interceptor_ ## func) ?				\
 	__interceptor_ ## func :					\
 	(__typeof__(&__interceptor_ ## func))dlsym(RTLD_NEXT, #func)
+#else
+#define DECL(ret_type, func, ...) \
+	static ret_type (*real_ ## func)(__VA_ARGS__);			\
+	static int wrapped_calls_ ## func;
+
+#define REAL(func) (__typeof__(real_ ## func)) dlsym(RTLD_NEXT, #func)
+#endif
 
 DECL(int, socket, int, int, int);
 DECL(int, fcntl, int, int, ...);
