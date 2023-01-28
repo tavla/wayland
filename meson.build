@@ -74,9 +74,9 @@ endif
 config_h.set10('HAVE_BROKEN_MSG_CMSG_CLOEXEC', have_broken_msg_cmsg_cloexec)
 
 if get_option('libraries')
-	if host_machine.system() == 'freebsd'
-		# When building for FreeBSD, epoll(7) is provided by a userspace
-		# wrapper around kqueue(2).
+	if host_machine.system() in ['darwin', 'freebsd']
+		# When building for darwin or FreeBSD, epoll(7) is provided by a
+		# userspace wrapper around kqueue(2).
 		epoll_dep = dependency('epoll-shim')
 	else
 		# Otherwise, assume that epoll(7) is supported natively.
