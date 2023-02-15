@@ -2442,6 +2442,25 @@
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
     </event>
+
+    <!-- Version 8 additions -->
+
+    <event name="logical_keyboard" since="8">
+      <description summary="">
+	This event is sent at least once before any key, modifiers and keymap events.
+	Each following key, modifiers and keymap event belongs to the logical keyboard with the ID of the most recent logical_keyboard event.
+      </description>
+      <arg name="id" type="uint" summary="logical keyboard ID"/>
+    </event>
+
+    <event name="logical_keyboard_done" since="8">
+      <description summary="">
+	The logical keyboard with ID will receive no further events.
+	This means in particular that the keymap associated with this
+	logical keyboard is no longer needed.
+      </description>
+      <arg name="id" type="uint" summary="logical keyboard ID"/>
+    </event>
   </interface>
 
   <interface name="wl_touch" version="8">
