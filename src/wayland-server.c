@@ -537,12 +537,15 @@ wl_client_create(struct wl_display *display, int fd)
 
 	wl_priv_signal_init(&client->resource_created_signal);
 	client->display = display;
-	client->source = wl_event_loop_add_fd(display->loop, fd,
-					      WL_EVENT_READABLE,
-					      wl_client_connection_data, client);
 
-	if (!client->source)
-		goto err_client;
+	if (display->loop) {
+		client->source = wl_event_loop_add_fd(display->loop, fd,
+						      WL_EVENT_READABLE,
+						      wl_client_connection_data,
+						      client);
+		if (!client->source)
+			goto err_client;
+	}
 
 	if (wl_os_socket_peercred(fd, &client->uid, &client->gid,
 				  &client->pid) != 0)
@@ -572,7 +575,8 @@ err_map:
 	wl_map_release(&client->objects);
 	wl_connection_destroy(client->connection);
 err_source:
-	wl_event_source_remove(client->source);
+	if (client->source)
+		wl_event_source_remove(client->source);
 err_client:
 	free(client);
 	return NULL;
@@ -937,7 +941,8 @@ wl_client_destroy(struct wl_client *client)
 	wl_client_flush(client);
 	wl_map_for_each(&client->objects, destroy_resource, &serial);
 	wl_map_release(&client->objects);
-	wl_event_source_remove(client->source);
+	if (client->source)
+		wl_event_source_remove(client->source);
 	close(wl_connection_destroy(client->connection));
 
 	wl_priv_signal_final_emit(&client->destroy_late_signal, client);
@@ -1099,6 +1104,41 @@ handle_display_terminate(int fd, uint32_t mask, void *data) {
 	return 0;
 }
 
+WL_EXPORT struct wl_display *
+wl_display_create2(void)
+{
+	struct wl_display *display;
+	const char *debug;
+
+	debug = getenv("WAYLAND_DEBUG");
+	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
+		debug_server = 1;
+
+	display = zalloc(sizeof *display);
+	if (display == NULL)
+		return NULL;
+
+	wl_list_init(&display->global_list);
+	wl_list_init(&display->socket_list);
+	wl_list_init(&display->client_list);
+	wl_list_init(&display->registry_resource_list);
+	wl_list_init(&display->protocol_loggers);
+
+	wl_priv_signal_init(&display->destroy_signal);
+	wl_priv_signal_init(&display->create_client_signal);
+
+	display->terminate_efd = -1;
+	display->next_global_name = 1;
+	display->serial = 0;
+
+	display->global_filter = NULL;
+	display->global_filter_data = NULL;
+
+	wl_array_init(&display->additional_shm_formats);
+
+	return display;
+}
+
 /** Create Wayland display object.
  *
  * \return The Wayland display object. Null if failed to create
@@ -1111,13 +1151,8 @@ WL_EXPORT struct wl_display *
 wl_display_create(void)
 {
 	struct wl_display *display;
-	const char *debug;
 
-	debug = getenv("WAYLAND_DEBUG");
-	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
-		debug_server = 1;
-
-	display = zalloc(sizeof *display);
+	display = wl_display_create2();
 	if (display == NULL)
 		return NULL;
 
@@ -1139,23 +1174,6 @@ wl_display_create(void)
 
 	if (display->term_source == NULL)
 		goto err_term_source;
-
-	wl_list_init(&display->global_list);
-	wl_list_init(&display->socket_list);
-	wl_list_init(&display->client_list);
-	wl_list_init(&display->registry_resource_list);
-	wl_list_init(&display->protocol_loggers);
-
-	wl_priv_signal_init(&display->destroy_signal);
-	wl_priv_signal_init(&display->create_client_signal);
-
-	display->next_global_name = 1;
-	display->serial = 0;
-
-	display->global_filter = NULL;
-	display->global_filter_data = NULL;
-
-	wl_array_init(&display->additional_shm_formats);
 
 	return display;
 
