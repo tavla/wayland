@@ -325,10 +325,9 @@ destroy_client_with_error(struct wl_client *client, const char *reason)
 	wl_client_destroy(client);
 }
 
-static int
-wl_client_connection_data(int fd, uint32_t mask, void *data)
+WL_EXPORT int
+wl_client_dispatch(struct wl_client *client)
 {
-	struct wl_client *client = data;
 	struct wl_connection *connection = client->connection;
 	struct wl_resource *resource;
 	struct wl_object *object;
@@ -339,36 +338,11 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	int opcode, size, since;
 	int len;
 
-	if (mask & WL_EVENT_HANGUP) {
-		wl_client_destroy(client);
-		return 1;
-	}
-
-	if (mask & WL_EVENT_ERROR) {
-		destroy_client_with_error(client, "socket error");
-		return 1;
-	}
-
-	if (mask & WL_EVENT_WRITABLE) {
-		len = wl_connection_flush(connection);
-		if (len < 0 && errno != EAGAIN) {
-			destroy_client_with_error(
-			    client, "failed to flush client connection");
-			return 1;
-		} else if (len >= 0) {
-			wl_event_source_fd_update(client->source,
-						  WL_EVENT_READABLE);
-		}
-	}
-
-	len = 0;
-	if (mask & WL_EVENT_READABLE) {
-		len = wl_connection_read(connection);
-		if (len == 0 || (len < 0 && errno != EAGAIN)) {
-			destroy_client_with_error(
-			    client, "failed to read client connection");
-			return 1;
-		}
+	len = wl_connection_read(connection);
+	if (len == 0 || (len < 0 && errno != EAGAIN)) {
+		destroy_client_with_error(
+		    client, "failed to read client connection");
+		return -1;
 	}
 
 	while (len >= 0 && (size_t) len >= sizeof p) {
@@ -453,6 +427,42 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	if (client->error) {
 		destroy_client_with_error(client,
 					  "error in client communication");
+	}
+
+	return 0;
+}
+
+static int
+wl_client_connection_data(int fd, uint32_t mask, void *data)
+{
+	struct wl_client *client = data;
+	struct wl_connection *connection = client->connection;
+	int len;
+
+	if (mask & WL_EVENT_HANGUP) {
+		wl_client_destroy(client);
+		return 1;
+	}
+
+	if (mask & WL_EVENT_ERROR) {
+		destroy_client_with_error(client, "socket error");
+		return 1;
+	}
+
+	if (mask & WL_EVENT_WRITABLE) {
+		len = wl_connection_flush(connection);
+		if (len < 0 && errno != EAGAIN) {
+			destroy_client_with_error(
+			    client, "failed to flush client connection");
+			return 1;
+		} else if (len >= 0) {
+			wl_event_source_fd_update(client->source,
+						  WL_EVENT_READABLE);
+		}
+	}
+
+	if (mask & WL_EVENT_READABLE) {
+		wl_client_dispatch(client);
 	}
 
 	return 1;
