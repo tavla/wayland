@@ -209,6 +209,12 @@ enum arg_type {
 	FD
 };
 
+enum element_type {
+        ELEMENT_TYPE_NONE,
+        ELEMENT_TYPE_INT,
+        ELEMENT_TYPE_UNSIGNED,
+};
+
 struct arg {
 	char *name;
 	enum arg_type type;
@@ -217,6 +223,7 @@ struct arg {
 	struct wl_list link;
 	char *summary;
 	char *enumeration_name;
+	enum element_type element_type;
 };
 
 struct enumeration {
@@ -716,6 +723,7 @@ start_element(void *data, const char *element_name, const char **atts)
 	const char *allow_null = NULL;
 	const char *enumeration_name = NULL;
 	const char *bitfield = NULL;
+	const char *element_type = NULL;
 	int i, version = 0;
 
 	ctx->loc.line_number = XML_GetCurrentLineNumber(ctx->parser);
@@ -743,6 +751,8 @@ start_element(void *data, const char *element_name, const char **atts)
 			enumeration_name = atts[i + 1];
 		if (strcmp(atts[i], "bitfield") == 0)
 			bitfield = atts[i + 1];
+		if (strcmp(atts[i], "element-type") == 0)
+			element_type = atts[i + 1];
 	}
 
 	ctx->character_data_length = 0;
@@ -840,6 +850,20 @@ start_element(void *data, const char *element_name, const char **atts)
 			arg->enumeration_name = NULL;
 		else
 			arg->enumeration_name = xstrdup(enumeration_name);
+
+		if (element_type == NULL) {
+			arg->element_type = ELEMENT_TYPE_NONE;
+		} else {
+			if (strcmp(element_type, "int") == 0) {
+				arg->element_type = ELEMENT_TYPE_INT;
+			} else if (strcmp(element_type, "uint") == 0) {
+			        arg->element_type = ELEMENT_TYPE_UNSIGNED;
+			} else {
+				fail(&ctx->loc,
+				     "invalid element type '%s', must be int or uint",
+				     element_type);
+			}
+		}
 
 		if (summary)
 			arg->summary = xstrdup(summary);
@@ -953,15 +977,34 @@ verify_arguments(struct parse_context *ctx,
 		struct arg *a;
 		wl_list_for_each(a, &m->arg_list, link) {
 			struct enumeration *e;
+			enum arg_type t;
+
+			if (a->element_type != ELEMENT_TYPE_NONE && a->type != ARRAY) {
+				fail(&ctx->loc,
+				     "only args of type array may specify an element-type");
+			}
+
+			switch (a->element_type) {
+			case ELEMENT_TYPE_NONE:
+				t = a->type;
+				break;
+			case ELEMENT_TYPE_INT:
+			        t = INT;
+			        break;
+			case ELEMENT_TYPE_UNSIGNED:
+				t = UNSIGNED;
+				break;
+			default:
+				abort();
+			}
 
 			if (!a->enumeration_name)
 				continue;
 
-
 			e = find_enumeration(ctx->protocol, interface,
 					     a->enumeration_name);
 
-			switch (a->type) {
+			switch (t) {
 			case INT:
 				if (e && e->bitfield)
 					fail(&ctx->loc,
@@ -969,6 +1012,9 @@ verify_arguments(struct parse_context *ctx,
 				break;
 			case UNSIGNED:
 				break;
+			case ARRAY:
+				fail(&ctx->loc,
+				     "array arg must specify element-type if enum is specified");
 			default:
 				fail(&ctx->loc,
 				     "enumeration-style argument has wrong type");

@@ -28,5 +28,6 @@
   <!ATTLIST arg interface CDATA #IMPLIED>
   <!ATTLIST arg allow-null CDATA #IMPLIED>
   <!ATTLIST arg enum CDATA #IMPLIED>
+  <!ATTLIST arg element-type CDATA #IMPLIED>
 <!ELEMENT description (#PCDATA)>
   <!ATTLIST description summary CDATA #REQUIRED>
