@@ -436,10 +436,28 @@ wl_connection_put_fd(struct wl_connection *connection, int32_t fd)
 	return ring_buffer_put(&connection->fds_out, &fd, sizeof fd);
 }
 
+static const char *
+parse_array_signature(const char *signature, struct argument_details *details)
+{
+	details->type = *signature;
+	if (signature[1] == '[') {
+		details->element_type = signature[2];
+		signature += 3;
+		while (*signature != ']') {
+			details->element_bits *= 10;
+			details->element_bits += (*signature) - '0';
+			++signature;
+		}
+	}
+	return signature + 1;
+}
+
 const char *
 get_next_argument(const char *signature, struct argument_details *details)
 {
 	details->nullable = 0;
+	details->element_type = '\0';
+	details->element_bits = 0;
 	for(; *signature; ++signature) {
 		switch(*signature) {
 		case 'i':
@@ -448,10 +466,11 @@ get_next_argument(const char *signature, struct argument_details *details)
 		case 's':
 		case 'o':
 		case 'n':
-		case 'a':
 		case 'h':
 			details->type = *signature;
 			return signature + 1;
+		case 'a':
+			return parse_array_signature(signature, details);
 		case '?':
 			details->nullable = 1;
 		}
@@ -472,9 +491,14 @@ arg_count_for_signature(const char *signature)
 		case 's':
 		case 'o':
 		case 'n':
-		case 'a':
 		case 'h':
 			++count;
+			break;
+		case 'a':
+			++count;
+			if (signature[1] == '[')
+				while (*signature != ']') ++signature;
+			break;
 		}
 	}
 	return count;
@@ -1262,6 +1286,86 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection)
 	return result;
 }
 
+static void
+wl_closure_print_array(FILE *f, struct argument_details *arg,
+		       struct wl_array *array)
+{
+	int8_t *i8;
+	int16_t *i16;
+	int32_t *i32;
+	uint8_t *u8;
+	uint16_t *u16;
+	uint32_t *u32;
+
+	fprintf(f, "array[");
+	switch (arg->element_type) {
+	case 'i':
+	        switch (arg->element_bits) {
+	        case 8:
+			wl_array_for_each(i8, array) {
+				if (i8 == array->data)
+					fprintf(f, "%"PRId8, *i8);
+				else
+					fprintf(f, ",%"PRId8, *i8);
+			}
+			break;
+	        case 16:
+			wl_array_for_each(i16, array) {
+				if (i16 == array->data)
+					fprintf(f, "%"PRId16, *i16);
+				else
+					fprintf(f, ",%"PRId16, *i16);
+			}
+			break;
+	        case 32:
+			wl_array_for_each(i32, array) {
+				if (i32 == array->data)
+					fprintf(f, "%"PRId32, *i32);
+				else
+					fprintf(f, ",%"PRId32, *i32);
+			}
+			break;
+		default:
+			abort();
+		}
+		break;
+	case 'u':
+	        switch (arg->element_bits) {
+	        case 8:
+			wl_array_for_each(u8, array) {
+				if (u8 == array->data)
+					fprintf(f, "%"PRIu8, *u8);
+				else
+					fprintf(f, ",%"PRIu8, *u8);
+			}
+			break;
+	        case 16:
+			wl_array_for_each(u16, array) {
+				if (u16 == array->data)
+					fprintf(f, "%"PRIu16, *u16);
+				else
+					fprintf(f, ",%"PRIu16, *u16);
+			}
+			break;
+	        case 32:
+			wl_array_for_each(u32, array) {
+				if (u32 == array->data)
+					fprintf(f, "%"PRIu32, *u32);
+				else
+					fprintf(f, ",%"PRIu32, *u32);
+			}
+			break;
+		default:
+			abort();
+		}
+		break;
+	case '\0':
+		fprintf(f, "size: %zu", array->size);
+		break;
+	}
+	fprintf(f, "]");
+}
+
 void
 wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 		 int send, int discarded, uint32_t (*n_parse)(union wl_argument *arg))
@@ -1345,7 +1449,7 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 				fprintf(f, "nil");
 			break;
 		case 'a':
-			fprintf(f, "array[%zu]", closure->args[i].a->size);
+			wl_closure_print_array(f, &arg, closure->args[i].a);
 			break;
 		case 'h':
 			fprintf(f, "fd %d", closure->args[i].h);

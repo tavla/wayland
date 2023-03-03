@@ -1877,7 +1877,17 @@ emit_messages(const char *name, struct wl_list *message_list,
 				printf("o");
 				break;
 			case ARRAY:
-				printf("a");
+				switch (a->element_type) {
+				case ELEMENT_TYPE_NONE:
+					printf("a");
+					break;
+				case ELEMENT_TYPE_INT:
+					printf("a[i%d]", a->element_bits);
+					break;
+				case ELEMENT_TYPE_UNSIGNED:
+					printf("a[u%d]", a->element_bits);
+					break;
+				}
 				break;
 			case FD:
 				printf("h");
