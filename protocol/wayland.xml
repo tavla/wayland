@@ -2441,7 +2441,8 @@
       </description>
       <arg name="serial" type="uint" summary="serial number of the enter event"/>
       <arg name="surface" type="object" interface="wl_surface" summary="surface gaining keyboard focus"/>
-      <arg name="keys" type="array" summary="the currently pressed keys"/>
+      <arg name="keys" type="array" element-type="uint" element-bits="32"
+        summary="the currently pressed keys"/>
     </event>
 
     <event name="leave">
