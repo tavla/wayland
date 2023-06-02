@@ -16,7 +16,7 @@ config_h.set_quoted('PACKAGE', meson.project_name())
 config_h.set_quoted('PACKAGE_VERSION', meson.project_version())
 
 cc_args = []
-if host_machine.system() != 'freebsd'
+if host_machine.system() not in ['darwin', 'freebsd']
 	cc_args += ['-D_POSIX_C_SOURCE=200809L']
 endif
 add_project_arguments(cc_args, language: 'c')
@@ -51,7 +51,7 @@ foreach f: have_funcs
 	config_h.set('HAVE_' + f.underscorify().to_upper(), cc.has_function(f))
 endforeach
 config_h.set10('HAVE_XUCRED_CR_PID', cc.has_member('struct xucred', 'cr_pid', prefix : '#include <sys/ucred.h>'))
-have_broken_msg_cmsg_cloexec = false
+have_broken_msg_cmsg_cloexec = (host_machine.system() == 'darwin')
 if host_machine.system() == 'freebsd'
 	have_broken_msg_cmsg_cloexec = not cc.compiles('''
 #include <sys/param.h> /* To get __FreeBSD_version. */
@@ -69,8 +69,8 @@ endif
 config_h.set10('HAVE_BROKEN_MSG_CMSG_CLOEXEC', have_broken_msg_cmsg_cloexec)
 
 if get_option('libraries')
-	if host_machine.system() == 'freebsd'
-		# When building for FreeBSD, epoll(7) is provided by a userspace
+	if host_machine.system() in ['darwin', 'freebsd']
+		# When building for macOS or FreeBSD, epoll(7) is provided by a userspace
 		# wrapper around kqueue(2).
 		epoll_dep = dependency('epoll-shim')
 	else
