@@ -47,6 +47,7 @@
 
 static int fall_back;
 
+#ifdef __ELF__
 /* Play nice with sanitizers
  *
  * Sanitizers need to intercept syscalls in the compiler run-time library. As
@@ -71,6 +72,13 @@ static int fall_back;
 #define REAL(func) (__interceptor_ ## func) ?				\
 	__interceptor_ ## func :					\
 	(__typeof__(&__interceptor_ ## func))dlsym(RTLD_NEXT, #func)
+#else
+#define DECL(ret_type, func, ...) \
+	static ret_type (*real_ ## func)(__VA_ARGS__);			\
+	static int wrapped_calls_ ## func;
+
+#define REAL(func) (__typeof__(real_ ## func)) dlsym(RTLD_NEXT, #func)
+#endif
 
 DECL(int, socket, int, int, int);
 DECL(int, fcntl, int, int, ...);
@@ -92,10 +100,12 @@ socket(int domain, int type, int protocol)
 {
 	wrapped_calls_socket++;
 
+#ifdef SOCK_CLOEXEC
 	if (fall_back && (type & SOCK_CLOEXEC)) {
 		errno = EINVAL;
 		return -1;
 	}
+#endif
 
 	return real_socket(domain, type, protocol);
 }
@@ -141,10 +151,12 @@ recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
 	wrapped_calls_recvmsg++;
 
+#ifdef MSG_CMSG_CLOEXEC
 	if (fall_back && (flags & MSG_CMSG_CLOEXEC)) {
 		errno = EINVAL;
 		return -1;
 	}
+#endif
 
 	return real_recvmsg(sockfd, msg, flags);
 }
@@ -179,7 +191,11 @@ do_os_wrappers_socket_cloexec(int n)
 	 * Must have 2 calls if falling back, but must also allow
 	 * falling back without a forced fallback.
 	 */
+#ifdef SOCK_CLOEXEC
 	assert(wrapped_calls_socket > n);
+#else
+	assert(wrapped_calls_socket == 1);
+#endif
 
 	exec_fd_leak_check(nr_fds);
 }
@@ -253,8 +269,8 @@ struct marshal_data {
 static void
 setup_marshal_data(struct marshal_data *data)
 {
-	assert(socketpair(AF_UNIX,
-			  SOCK_STREAM | SOCK_CLOEXEC, 0, data->s) == 0);
+	assert(wl_os_socketpair_cloexec(AF_UNIX,
+			  SOCK_STREAM, 0, data->s) == 0);
 
 	data->read_connection = wl_connection_create(data->s[0]);
 	assert(data->read_connection);
@@ -342,9 +358,10 @@ do_os_wrappers_recvmsg_cloexec(int n)
 	struct marshal_data data;
 
 	data.nr_fds_begin = count_open_fds();
-#if HAVE_BROKEN_MSG_CMSG_CLOEXEC
+#if HAVE_BROKEN_MSG_CMSG_CLOEXEC || !defined(MSG_CMSG_CLOEXEC)
 	/* We call the fallback directly on FreeBSD versions with a broken
-	 * MSG_CMSG_CLOEXEC, so we don't call the local recvmsg() wrapper. */
+	 * MSG_CMSG_CLOEXEC or platforms without MSG_CMSG_CLOEXEC, so we
+         * don't call the local recvmsg() wrapper. */
 	data.wrapped_calls = 0;
 #else
 	data.wrapped_calls = n;

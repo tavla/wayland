@@ -69,14 +69,36 @@ wl_os_socket_cloexec(int domain, int type, int protocol)
 {
 	int fd;
 
+#ifdef SOCK_CLOEXEC
 	fd = socket(domain, type | SOCK_CLOEXEC, protocol);
 	if (fd >= 0)
 		return fd;
 	if (errno != EINVAL)
 		return -1;
+#endif
 
 	fd = socket(domain, type, protocol);
 	return set_cloexec_or_close(fd);
+}
+
+int
+wl_os_socketpair_cloexec(int domain, int type, int protocol, int sv[2])
+{
+	int retval;
+
+#ifdef SOCK_CLOEXEC
+	retval = socketpair(domain, type | SOCK_CLOEXEC, protocol, sv);
+	if (retval >= 0)
+		return retval;
+	if (errno != EINVAL)
+		return -1;
+#endif
+
+	retval = socketpair(domain, type, protocol, sv);
+	if (set_cloexec_or_close(sv[0]) == -1 || set_cloexec_or_close(sv[1]) == -1)
+		retval = -1;
+
+	return retval;
 }
 
 #if defined(__FreeBSD__)
@@ -115,6 +137,22 @@ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 	*pid = ucred.pid;
 	return 0;
 }
+#elif defined(HAVE_GETPEEREID) && defined(LOCAL_PEERPID)
+int
+wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
+{
+	socklen_t len;
+
+	if (getpeereid(sockfd, uid, gid) != 0) {
+		return -1;
+	}
+
+	len = sizeof(pid_t);
+	if (getsockopt(sockfd, SOL_LOCAL, LOCAL_PEERPID, pid, &len) != 0) {
+		return -1;
+	}
+	return 0;
+}
 #else
 #error "Don't know how to read ucred on this platform"
 #endif
@@ -124,11 +162,13 @@ wl_os_dupfd_cloexec(int fd, int minfd)
 {
 	int newfd;
 
+#ifdef F_DUPFD_CLOEXEC
 	newfd = fcntl(fd, F_DUPFD_CLOEXEC, minfd);
 	if (newfd >= 0)
 		return newfd;
 	if (errno != EINVAL)
 		return -1;
+#endif
 
 	newfd = fcntl(fd, F_DUPFD, minfd);
 	return set_cloexec_or_close(newfd);
@@ -176,7 +216,7 @@ wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 	 * fix (https://cgit.freebsd.org/src/commit/?id=6ceacebdf52211).
 	 */
 #pragma message("Using fallback directly since MSG_CMSG_CLOEXEC is broken.")
-#else
+#elif defined(MSG_CMSG_CLOEXEC)
 	ssize_t len;
 
 	len = recvmsg(sockfd, msg, flags | MSG_CMSG_CLOEXEC);

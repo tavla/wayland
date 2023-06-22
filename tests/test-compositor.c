@@ -93,7 +93,7 @@ get_socket_name(void)
 
 	gettimeofday(&tv, NULL);
 	snprintf(retval, sizeof retval, "wayland-test-%d-%ld%ld",
-		 getpid(), tv.tv_sec, tv.tv_usec);
+		 (int)getpid(), (long)tv.tv_sec, (long)tv.tv_usec);
 
 	return retval;
 }
@@ -510,7 +510,7 @@ static const struct wl_registry_listener registry_listener =
 	NULL
 };
 
-struct client *client_connect()
+struct client *client_connect(void)
 {
 	struct wl_registry *reg;
 	struct client *c = calloc(1, sizeof *c);

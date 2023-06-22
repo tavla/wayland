@@ -19,6 +19,10 @@ cc_args = []
 if host_machine.system() != 'freebsd'
 	cc_args += ['-D_POSIX_C_SOURCE=200809L']
 endif
+if host_machine.system() == 'darwin'
+	# For CMSG_LEN(), which is an RFC 2292 addition and not part of POSIX.1-2008
+	cc_args += ['-D_DARWIN_C_SOURCE']
+endif
 add_project_arguments(cc_args, language: 'c')
 
 compiler_flags = [
@@ -40,6 +44,7 @@ endforeach
 
 have_funcs = [
 	'accept4',
+	'getpeereid',
 	'mkostemp',
 	'posix_fallocate',
 	'prctl',
@@ -69,15 +74,20 @@ endif
 config_h.set10('HAVE_BROKEN_MSG_CMSG_CLOEXEC', have_broken_msg_cmsg_cloexec)
 
 if get_option('libraries')
-	if host_machine.system() == 'freebsd'
-		# When building for FreeBSD, epoll(7) is provided by a userspace
-		# wrapper around kqueue(2).
+	if host_machine.system() in ['darwin', 'freebsd']
+		# When building for darwin or FreeBSD, epoll(7) is provided by a
+		# userspace wrapper around kqueue(2).
 		epoll_dep = dependency('epoll-shim')
 	else
 		# Otherwise, assume that epoll(7) is supported natively.
 		epoll_dep = []
 	endif
-	ffi_dep = dependency('libffi')
+
+	if host_machine.system() == 'darwin'
+		ffi_dep = cc.find_library('ffi')
+	else
+		ffi_dep = dependency('libffi')
+	endif
 
 	decls = [
 		{ 'header': 'sys/signalfd.h', 'symbol': 'SFD_CLOEXEC' },
@@ -91,11 +101,15 @@ if get_option('libraries')
 		endif
 	endforeach
 
-	rt_dep = []
-	if not cc.has_function('clock_gettime', prefix: '#include <time.h>')
-		rt_dep = cc.find_library('rt')
-		if not cc.has_function('clock_gettime', prefix: '#include <time.h>', dependencies: rt_dep, args: cc_args)
-			error('clock_gettime not found')
+	if host_machine.system() == 'darwin'
+		rt_dep = []
+	else
+		rt_dep = []
+		if cc.has_function('clock_gettime', prefix: '#include <time.h>')
+			rt_dep = cc.find_library('rt')
+			if not cc.has_function('clock_gettime', prefix: '#include <time.h>', dependencies: rt_dep, args: cc_args)
+				error('clock_gettime not found')
+			endif
 		endif
 	endif
 endif
