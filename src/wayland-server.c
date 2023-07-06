@@ -591,7 +591,7 @@ err_client:
  * \memberof wl_client
  */
 WL_EXPORT void
-wl_client_get_credentials(struct wl_client *client,
+wl_client_get_credentials(const struct wl_client *client,
 			  pid_t *pid, uid_t *uid, gid_t *gid)
 {
 	if (pid)
@@ -760,7 +760,7 @@ wl_resource_destroy(struct wl_resource *resource)
 }
 
 WL_EXPORT uint32_t
-wl_resource_get_id(struct wl_resource *resource)
+wl_resource_get_id(const struct wl_resource *resource)
 {
 	return resource->object.id;
 }
@@ -814,7 +814,7 @@ wl_resource_get_user_data(struct wl_resource *resource)
 }
 
 WL_EXPORT int
-wl_resource_get_version(struct wl_resource *resource)
+wl_resource_get_version(const struct wl_resource *resource)
 {
 	return resource->version;
 }
@@ -861,7 +861,7 @@ wl_resource_get_destroy_listener(struct wl_resource *resource,
  * \memberof wl_resource
  */
 WL_EXPORT const char *
-wl_resource_get_class(struct wl_resource *resource)
+wl_resource_get_class(const struct wl_resource *resource)
 {
 	return resource->object.interface->name;
 }
@@ -1443,7 +1443,7 @@ wl_global_set_user_data(struct wl_global *global, void *data)
  * \memberof wl_display
  */
 WL_EXPORT uint32_t
-wl_display_get_serial(struct wl_display *display)
+wl_display_get_serial(const struct wl_display *display)
 {
 	return display->serial;
 }
