@@ -80,6 +80,7 @@ struct wl_client {
 	struct wl_map objects;
 	struct wl_priv_signal destroy_signal;
 	struct wl_priv_signal destroy_late_signal;
+	struct wl_priv_signal event_dispatch_signal;
 	pid_t pid;
 	uid_t uid;
 	gid_t gid;
@@ -212,12 +213,13 @@ handle_array(struct wl_resource *resource, uint32_t opcode,
 {
 	struct wl_closure *closure;
 	struct wl_object *object = &resource->object;
+	struct wl_client *client = resource->client;
 
-	if (resource->client->error)
+	if (client->error)
 		return;
 
 	if (!verify_objects(resource, opcode, args)) {
-		resource->client->error = true;
+		client->error = true;
 		return;
 	}
 
@@ -225,14 +227,17 @@ handle_array(struct wl_resource *resource, uint32_t opcode,
 				     &object->interface->events[opcode]);
 
 	if (closure == NULL) {
-		resource->client->error = true;
+		client->error = true;
 		return;
 	}
 
 	log_closure(resource, closure, true);
 
-	if (send_func(closure, resource->client->connection))
-		resource->client->error = true;
+	if (send_func(closure, client->connection)) {
+		client->error = true;
+  	} else {
+ 		wl_priv_signal_final_emit(&client->event_dispatch_signal, client);
+  	}
 
 	wl_closure_destroy(closure);
 }
@@ -549,6 +554,7 @@ wl_client_create(struct wl_display *display, int fd)
 
 	wl_priv_signal_init(&client->destroy_signal);
 	wl_priv_signal_init(&client->destroy_late_signal);
+	wl_priv_signal_init(&client->event_dispatch_signal);
 	if (bind_display(client, display) < 0)
 		goto err_map;
 
@@ -915,6 +921,27 @@ wl_client_get_destroy_late_listener(struct wl_client *client,
 				    wl_notify_func_t notify)
 {
 	return wl_priv_signal_get(&client->destroy_late_signal, notify);
+}
+
+/** Add a listener to be called after successful event dispatch.
+ *
+ * \param client The client object.
+ * \param listener The listener to be added.
+ *
+ * After an event has been dispatched to this client, the listener will
+ * be notified.
+ *
+ * There is no requirement to remove the link of the wl_listener when the
+ * signal is emitted.
+ *
+ * \memberof wl_client
+ * \since 1.22.0
+ */
+WL_EXPORT void
+wl_client_add_event_dispatch_listener(struct wl_client *client,
+                                      struct wl_listener *listener)
+{
+	wl_priv_signal_add(&client->event_dispatch_signal, listener);
 }
 
 WL_EXPORT void
