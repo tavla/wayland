@@ -821,8 +821,11 @@ start_element(void *data, const char *element_name, const char **atts)
 			wl_list_insert(ctx->interface->event_list.prev,
 				       &message->link);
 
-		if (type != NULL && strcmp(type, "destructor") == 0)
+		if (type != NULL) {
+			if (strcmp(type, "destructor") != 0)
+				fail(&ctx->loc, "type of request or event must be \"destructor\" if specified");
 			message->destructor = 1;
+		}
 
 		version = version_from_since(ctx, since);
 		if (version < ctx->interface->since)
