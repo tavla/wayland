@@ -393,6 +393,7 @@ demarshal(struct marshal_data *data, const char *format,
 	assert(closure);
 	wl_closure_invoke(closure, WL_CLOSURE_INVOKE_SERVER, &object, 0, data);
 	wl_closure_destroy(closure);
+	wl_map_release(&objects);
 }
 
 TEST(connection_demarshal)
@@ -476,6 +477,7 @@ marshal_demarshal(struct marshal_data *data,
 	assert(closure);
 	wl_closure_invoke(closure, WL_CLOSURE_INVOKE_SERVER, &object, 0, data);
 	wl_closure_destroy(closure);
+	wl_map_release(&objects);
 }
 
 TEST(connection_marshal_demarshal)
@@ -540,6 +542,7 @@ expected_fail_demarshal(struct marshal_data *data, const char *format,
 
 	assert(closure == NULL);
 	assert(errno == expected_error);
+	wl_map_release(&objects);
 }
 
 TEST(connection_demarshal_null_strings)

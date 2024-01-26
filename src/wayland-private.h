@@ -59,19 +59,23 @@ wl_interface_equal(const struct wl_interface *iface1,
 		   const struct wl_interface *iface2);
 
 /* Flags for wl_map_insert_new and wl_map_insert_at.  Flags can be queried with
- * wl_map_lookup_flags.  The current implementation has room for 1 bit worth of
+ * wl_map_lookup_flags.  The current implementation has room for 32 bits worth of
  * flags.  If more flags are ever added, the implementation of wl_map will have
  * to change to allow for new flags */
 enum wl_map_entry_flags {
 	WL_MAP_ENTRY_LEGACY = (1 << 0), /* Server side only */
-	WL_MAP_ENTRY_ZOMBIE = (1 << 0) /* Client side only */
 };
 
 struct wl_map {
 	struct wl_array client_entries;
 	struct wl_array server_entries;
 	uint32_t side;
+	/* the free_list is LIFO, the zombie list is FIFO */
 	uint32_t free_list;
+	uint32_t zombie_list_head;
+	uint32_t zombie_list_tail;
+	/* if zombie_list_count is < 0, then the zombie_list is disabled */
+	int32_t zombie_list_count;
 };
 
 typedef enum wl_iterator_result (*wl_iterator_func_t)(void *element,
@@ -93,11 +97,17 @@ wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data);
 int
 wl_map_reserve_new(struct wl_map *map, uint32_t i);
 
-void
-wl_map_remove(struct wl_map *map, uint32_t i);
+int
+wl_map_zombify(struct wl_map *map, uint32_t i, const struct wl_interface *interface);
+
+int
+wl_map_mark_deleted(struct wl_map *map, uint32_t i);
 
 void *
 wl_map_lookup(struct wl_map *map, uint32_t i);
+
+const struct wl_interface *
+wl_map_lookup_zombie(struct wl_map *map, uint32_t i);
 
 uint32_t
 wl_map_lookup_flags(struct wl_map *map, uint32_t i);
@@ -178,6 +188,26 @@ struct wl_closure *
 wl_closure_vmarshal(struct wl_object *sender,
 		    uint32_t opcode, va_list ap,
 		    const struct wl_message *message);
+
+struct wl_closure *
+wl_connection_demarshal_common(struct wl_connection *connection,
+			       uint32_t size,
+			       struct wl_map *objects,
+			       const struct wl_message *message,
+			       int (*handle_new_id)(void *data,
+						    uint32_t id,
+						    const struct wl_interface *interface),
+			       void *data);
+
+void
+wl_connection_demarshal_zombie(struct wl_connection *connection,
+			uint32_t size,
+			struct wl_map *objects,
+			const struct wl_message *message,
+			int (*handle_new_id)(void* data,
+					       uint32_t id,
+					       const struct wl_interface *interface),
+			void *data);
 
 struct wl_closure *
 wl_connection_demarshal(struct wl_connection *connection,

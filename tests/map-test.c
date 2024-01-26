@@ -89,7 +89,8 @@ TEST(map_remove)
 	assert(wl_map_lookup(&map, j) == &b);
 	assert(wl_map_lookup(&map, k) == &c);
 
-	wl_map_remove(&map, j);
+	wl_map_mark_deleted(&map, j);
+	wl_map_zombify(&map, j, NULL);
 	assert(wl_map_lookup(&map, j) == NULL);
 
 	/* Verify that we insert d at the hole left by removing b */
@@ -107,15 +108,18 @@ TEST(map_flags)
 
 	wl_map_init(&map, WL_MAP_SERVER_SIDE);
 	i = wl_map_insert_new(&map, 0, &a);
-	j = wl_map_insert_new(&map, 1, &b);
+	uint32_t flag_value = 0xabcdef10;
+	/* 3 bits of flags are used internally, so we lose the high 3 here: */
+	uint32_t high_truncated_flag_value = (flag_value << 3) >> 3;
+	j = wl_map_insert_new(&map, high_truncated_flag_value, &b);
 	assert(i == WL_SERVER_ID_START);
 	assert(j == WL_SERVER_ID_START + 1);
 
 	assert(wl_map_lookup(&map, i) == &a);
 	assert(wl_map_lookup(&map, j) == &b);
 
-    assert(wl_map_lookup_flags(&map, i) == 0);
-    assert(wl_map_lookup_flags(&map, j) == 1);
+	assert(wl_map_lookup_flags(&map, i) == 0);
+	assert(wl_map_lookup_flags(&map, j) == high_truncated_flag_value);
 
 	wl_map_release(&map);
 }

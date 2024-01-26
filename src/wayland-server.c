@@ -327,6 +327,38 @@ destroy_client_with_error(struct wl_client *client, const char *reason)
 	wl_client_destroy(client);
 }
 
+/* zombify_new_id_queue_delete_id_event is only called by
+ * wl_connection_demarshal_zombie when the request it is demarhsalling
+ * has new_id argments, meaning they're client IDs.  Those client IDs
+ * need to have zombies created for them in case the client
+ * subsequently sends a request to them, which might contain fds or
+ * more new_ids. */
+static int
+zombify_new_id_queue_delete_id_event(void *clientp, uint32_t id,
+				     const struct wl_interface *interface)
+{
+	struct wl_client *client = clientp;
+
+	if (id < WL_SERVER_ID_START) {
+		if (wl_map_insert_at(&client->objects, 0, id, (void*)interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (wl_map_zombify(&client->objects, id, interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (client->display_resource)
+			wl_resource_queue_event(client->display_resource,
+						WL_DISPLAY_DELETE_ID, id);
+
+		return 0;
+	} else {
+		/* Unexpected: the id is a server ID. */
+		return -1;
+	}
+}
+
 static int
 wl_client_connection_data(int fd, uint32_t mask, void *data)
 {
@@ -340,6 +372,7 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	uint32_t resource_flags;
 	int opcode, size, since;
 	int len;
+	const struct wl_interface *interface;
 
 	if (mask & WL_EVENT_HANGUP) {
 		wl_client_destroy(client);
@@ -383,9 +416,29 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 		resource = wl_map_lookup(&client->objects, p[0]);
 		resource_flags = wl_map_lookup_flags(&client->objects, p[0]);
 		if (resource == NULL) {
-			wl_resource_post_error(client->display_resource,
-					       WL_DISPLAY_ERROR_INVALID_OBJECT,
-					       "invalid object %u", p[0]);
+			interface = wl_map_lookup_zombie(&client->objects, p[0]);
+			if (interface == NULL) {
+				wl_resource_post_error(client->display_resource,
+						       WL_DISPLAY_ERROR_INVALID_OBJECT,
+						       "invalid object %u", p[0]);
+				break;
+			}
+
+			if (opcode >= interface->method_count) {
+				wl_resource_post_error(client->display_resource,
+						       WL_DISPLAY_ERROR_INVALID_METHOD,
+						       "invalid method %d, object %s#%u",
+						       opcode,
+						       interface->name,
+						       p[0]);
+				break;
+			}
+
+			message = &interface->methods[opcode];
+			wl_connection_demarshal_zombie(client->connection, size,
+						       &client->objects, message,
+						       &zombify_new_id_queue_delete_id_event,
+						       client);
 			break;
 		}
 
@@ -735,7 +788,8 @@ remove_and_destroy_resource(void *element, void *data, uint32_t flags)
 {
 	struct wl_resource *resource = element;
 	struct wl_client *client = resource->client;
-	uint32_t id = resource->object.id;;
+	uint32_t id = resource->object.id;
+	const struct wl_interface *interface = resource->object.interface;
 
 	wl_signal_emit(&resource->deprecated_destroy_signal, resource);
 	/* Don't emit the new signal for deprecated resources, as that would
@@ -746,16 +800,12 @@ remove_and_destroy_resource(void *element, void *data, uint32_t flags)
 	if (resource->destroy)
 		resource->destroy(resource);
 
+	if (id < WL_SERVER_ID_START && client->display_resource)
+		wl_resource_queue_event(client->display_resource,
+					WL_DISPLAY_DELETE_ID, id);
+	
 	/* The resource should be cleared from the map before memory is freed. */
-	if (id < WL_SERVER_ID_START) {
-		if (client->display_resource) {
-			wl_resource_queue_event(client->display_resource,
-						WL_DISPLAY_DELETE_ID, id);
-		}
-		wl_map_insert_at(&client->objects, 0, id, NULL);
-	} else {
-		wl_map_remove(&client->objects, id);
-	}
+	wl_map_zombify(&client->objects, id, interface);
 
 	if (!(flags & WL_MAP_ENTRY_LEGACY))
 		free(resource);

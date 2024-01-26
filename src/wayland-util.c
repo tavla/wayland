@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #include "wayland-util.h"
 #include "wayland-private.h"
@@ -169,20 +170,48 @@ wl_interface_equal(const struct wl_interface *a, const struct wl_interface *b)
 	return a == b || strcmp(a->name, b->name) == 0;
 }
 
-union map_entry {
-	uintptr_t next;
+struct map_entry {
+	uint32_t next;
+	uint32_t flags : 8*sizeof(uint32_t) - 3;
+	uint32_t zombie : 1;
+	uint32_t freelisted : 1;
+	uint32_t deleted : 1;
 	void *data;
 };
 
-#define map_entry_is_free(entry) ((entry).next & 0x1)
-#define map_entry_get_data(entry) ((void *)((entry).next & ~(uintptr_t)0x3))
-#define map_entry_get_flags(entry) (((entry).next >> 1) & 0x1)
+int32_t max_zombie_list_count = 64;
+
+/* We cannot use NULL (0) to denote null links in the free list or
+   zombie list because index 0 is allowed on the server side: id ==
+   WL_SERVER_ID_START --> index == 0.  Instead, use: */
+static const uint32_t map_null_link = ~0;
+
+static inline int
+map_entry_is_free(struct map_entry *entry)
+{
+	return entry->zombie || entry->freelisted;
+}
+
+static inline void
+map_entry_clear(struct map_entry *entry)
+{
+	entry->next = map_null_link;
+	entry->flags = 0;
+	entry->zombie = 0;
+	entry->freelisted = 0;
+	entry->deleted = 0;
+	entry->data = NULL;
+}
 
 void
 wl_map_init(struct wl_map *map, uint32_t side)
 {
 	memset(map, 0, sizeof *map);
 	map->side = side;
+	map->free_list = map_null_link;
+	map->zombie_list_head = map_null_link;
+	map->zombie_list_tail = map_null_link;
+	map->zombie_list_count = 0;
 }
 
 void
@@ -195,7 +224,7 @@ wl_map_release(struct wl_map *map)
 uint32_t
 wl_map_insert_new(struct wl_map *map, uint32_t flags, void *data)
 {
-	union map_entry *start, *entry;
+	struct map_entry *start, *entry;
 	struct wl_array *entries;
 	uint32_t base;
 	uint32_t count;
@@ -208,9 +237,10 @@ wl_map_insert_new(struct wl_map *map, uint32_t flags, void *data)
 		base = WL_SERVER_ID_START;
 	}
 
-	if (map->free_list) {
+	if (map->free_list != map_null_link) {
 		start = entries->data;
-		entry = &start[map->free_list >> 1];
+		entry = &start[map->free_list];
+		assert(entry->freelisted);
 		map->free_list = entry->next;
 	} else {
 		entry = wl_array_add(entries, sizeof *entry);
@@ -235,20 +265,21 @@ wl_map_insert_new(struct wl_map *map, uint32_t flags, void *data)
 		errno = ENOSPC;
 		return 0;
 	}
+	map_entry_clear(entry);
 	entry->data = data;
-	entry->next |= (flags & 0x1) << 1;
-
+	entry->flags = flags;
 	return count + base;
 }
 
 int
 wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
 {
-	union map_entry *start;
+	struct map_entry *start;
 	uint32_t count;
 	struct wl_array *entries;
 
 	if (i < WL_SERVER_ID_START) {
+		assert(i == 0 || map->side == WL_MAP_SERVER_SIDE);
 		entries = &map->client_entries;
 	} else {
 		entries = &map->server_entries;
@@ -272,8 +303,10 @@ wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
 	}
 
 	start = entries->data;
+
+	map_entry_clear(&start[i]);
 	start[i].data = data;
-	start[i].next |= (flags & 0x1) << 1;
+	start[i].flags = flags;
 
 	return 0;
 }
@@ -281,7 +314,7 @@ wl_map_insert_at(struct wl_map *map, uint32_t flags, uint32_t i, void *data)
 int
 wl_map_reserve_new(struct wl_map *map, uint32_t i)
 {
-	union map_entry *start;
+	struct map_entry *start;
 	uint32_t count;
 	struct wl_array *entries;
 
@@ -318,10 +351,16 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i)
 			return -1;
 
 		start = entries->data;
-		start[i].data = NULL;
+		map_entry_clear(&start[i]);
 	} else {
 		start = entries->data;
-		if (start[i].data != NULL) {
+
+		assert(!start[i].freelisted);
+
+		/* In the new zombie regime, there may be zombies in
+		 * any map, even opposite side ones.  So a test here
+		 * for start[i].data != NULL is no longer right.*/
+		if (!map_entry_is_free(&start[i])) {
 			errno = EINVAL;
 			return -1;
 		}
@@ -330,34 +369,128 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i)
 	return 0;
 }
 
-void
-wl_map_remove(struct wl_map *map, uint32_t i)
+int
+wl_map_zombify(struct wl_map *map, uint32_t i, const struct wl_interface *interface)
 {
-	union map_entry *start;
+	struct map_entry *start, *entry;
 	struct wl_array *entries;
+	bool use_zombie_list;
+	uint32_t count;
+	static bool checked_env = false;
+	const char *max_var;
+
+	assert(i != 0);
+
+	if (i < WL_SERVER_ID_START) {
+		use_zombie_list = false;
+		entries = &map->client_entries;
+	} else {
+		use_zombie_list = (map->side == WL_MAP_SERVER_SIDE) &&
+			(map->zombie_list_count >= 0);
+		entries = &map->server_entries;
+		i -= WL_SERVER_ID_START;
+	}
+
+	start = entries->data;
+	count = entries->size / sizeof *start;
+
+	if (i >= count)
+		return -1;
+
+	if (start[i].deleted) {
+		/* No need to make this entry into a zombie if it has
+		   already been in a delete_id message - put it on the
+		   free list instead */
+		start[i].next = map->free_list;
+		start[i].freelisted = 1;
+		map->free_list = i;
+		return 0;
+	}
+
+	start[i].data = (void*)interface;
+	start[i].zombie = 1;
+	start[i].next = map_null_link;
+
+	if (use_zombie_list) {
+		if (!checked_env) {
+			checked_env = true;
+			max_var = getenv("WAYLAND_MAX_ZOMBIE_LIST_COUNT");
+			if (max_var && *max_var)
+				max_zombie_list_count = atoi(max_var);
+		}
+
+		if (map->zombie_list_tail != map_null_link)
+			start[map->zombie_list_tail].next = i;
+		else
+			map->zombie_list_head = i;
+		map->zombie_list_tail = i;
+		map->zombie_list_count++;
+
+		if (map->zombie_list_count > max_zombie_list_count) {
+			i = map->zombie_list_head;
+			entry = &start[i];
+			map->zombie_list_head = entry->next;
+			if (map->zombie_list_head == map_null_link)
+				map->zombie_list_tail = map_null_link;
+			map->zombie_list_count--;
+
+			entry->next = map->free_list;
+			entry->freelisted = 1;
+			entry->zombie = 0;
+			map->free_list = i;
+		}
+	}
+	return 0;
+}
+
+int
+wl_map_mark_deleted(struct wl_map *map, uint32_t i)
+{
+	struct map_entry *start;
+	struct wl_array *entries;
+	uint32_t count;
+
+	assert(i != 0);
 
 	if (i < WL_SERVER_ID_START) {
 		if (map->side == WL_MAP_SERVER_SIDE)
-			return;
+			return 0;
 
 		entries = &map->client_entries;
 	} else {
 		if (map->side == WL_MAP_CLIENT_SIDE)
-			return;
+			return 0;
 
 		entries = &map->server_entries;
 		i -= WL_SERVER_ID_START;
 	}
 
 	start = entries->data;
-	start[i].next = map->free_list;
-	map->free_list = (i << 1) | 1;
+	count = entries->size / sizeof *start;
+
+	if (i >= count)
+		return -1;
+
+	/* turn off the zombie list - because the zombie_list is not
+	   needed if we are receiving delete_id messages, and is
+	   incompatible with randomly moving zombies directly to the
+	   free list */
+	map->zombie_list_count = -1;
+
+	start[i].deleted = 1;
+	if (start[i].zombie) {
+		start[i].next = map->free_list;
+		start[i].freelisted = 1;
+		start[i].zombie = 0;
+		map->free_list = i;
+	}
+	return 0;
 }
 
 void *
 wl_map_lookup(struct wl_map *map, uint32_t i)
 {
-	union map_entry *start;
+	struct map_entry *start;
 	uint32_t count;
 	struct wl_array *entries;
 
@@ -371,8 +504,31 @@ wl_map_lookup(struct wl_map *map, uint32_t i)
 	start = entries->data;
 	count = entries->size / sizeof *start;
 
-	if (i < count && !map_entry_is_free(start[i]))
-		return map_entry_get_data(start[i]);
+	if (i < count && !map_entry_is_free(&start[i]))
+		return start[i].data;
+
+	return NULL;
+}
+
+const struct wl_interface *
+wl_map_lookup_zombie(struct wl_map *map, uint32_t i)
+{
+	struct map_entry *start;
+	uint32_t count;
+	struct wl_array *entries;
+
+	if (i < WL_SERVER_ID_START) {
+		entries = &map->client_entries;
+	} else {
+		entries = &map->server_entries;
+		i -= WL_SERVER_ID_START;
+	}
+
+	start = entries->data;
+	count = entries->size / sizeof *start;
+
+	if (i < count && start[i].zombie)
+		return start[i].data;
 
 	return NULL;
 }
@@ -380,7 +536,7 @@ wl_map_lookup(struct wl_map *map, uint32_t i)
 uint32_t
 wl_map_lookup_flags(struct wl_map *map, uint32_t i)
 {
-	union map_entry *start;
+	struct map_entry *start;
 	uint32_t count;
 	struct wl_array *entries;
 
@@ -394,8 +550,8 @@ wl_map_lookup_flags(struct wl_map *map, uint32_t i)
 	start = entries->data;
 	count = entries->size / sizeof *start;
 
-	if (i < count && !map_entry_is_free(start[i]))
-		return map_entry_get_flags(start[i]);
+	if (i < count && !map_entry_is_free(&start[i]))
+		return start[i].flags;
 
 	return 0;
 }
@@ -404,16 +560,16 @@ static enum wl_iterator_result
 for_each_helper(struct wl_array *entries, wl_iterator_func_t func, void *data)
 {
 	enum wl_iterator_result ret = WL_ITERATOR_CONTINUE;
-	union map_entry entry, *start;
+	struct map_entry entry, *start;
 	size_t count;
 
-	start = (union map_entry *) entries->data;
-	count = entries->size / sizeof(union map_entry);
+	start = (struct map_entry *) entries->data;
+	count = entries->size / sizeof(struct map_entry);
 
 	for (size_t idx = 0; idx < count; idx++) {
 		entry = start[idx];
-		if (entry.data && !map_entry_is_free(entry)) {
-			ret = func(map_entry_get_data(entry), data, map_entry_get_flags(entry));
+		if (entry.data && !map_entry_is_free(&entry)) {
+			ret = func(entry.data, data, entry.flags);
 			if (ret != WL_ITERATOR_CONTINUE)
 				break;
 		}

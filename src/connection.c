@@ -689,10 +689,14 @@ wl_closure_vmarshal(struct wl_object *sender, uint32_t opcode, va_list ap,
 }
 
 struct wl_closure *
-wl_connection_demarshal(struct wl_connection *connection,
+wl_connection_demarshal_common(struct wl_connection *connection,
 			uint32_t size,
 			struct wl_map *objects,
-			const struct wl_message *message)
+			const struct wl_message *message,
+			int (*handle_new_id)(void *data,
+						uint32_t id,
+						const struct wl_interface *interface),
+			void *data)
 {
 	uint32_t *p, *next, *end, length, length_in_u32, id;
 	int fd;
@@ -813,7 +817,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 				goto err;
 			}
 
-			if (wl_map_reserve_new(objects, id) < 0) {
+			if (handle_new_id(data, id, message->types[i]) < 0) {
 				if (errno == EINVAL) {
 					wl_log("not a valid new object id (%u), "
 					       "message %s(%s)\n", id,
@@ -876,21 +880,51 @@ wl_connection_demarshal(struct wl_connection *connection,
 	return NULL;
 }
 
+static int
+reserve_new_id(void *data, uint32_t id, const struct wl_interface *interface)
+{
+	struct wl_map *objects = data;
+	return wl_map_reserve_new(objects, id);
+}
+
+struct wl_closure *
+wl_connection_demarshal(struct wl_connection *connection,
+			uint32_t size,
+			struct wl_map *objects,
+			const struct wl_message *message)
+{
+	return wl_connection_demarshal_common(connection,
+					      size,
+					      objects,
+					      message,
+					      &reserve_new_id,
+					      objects);
+}
+
+/* demarshal messages to zombies.  handle_new_id should create a new zombie. */
+void
+wl_connection_demarshal_zombie(struct wl_connection *connection,
+			       uint32_t size,
+			       struct wl_map *objects,
+			       const struct wl_message *message,
+			       int (*handle_new_id)(void* data,
+						      uint32_t id,
+						      const struct wl_interface *interface),
+			       void *data)
+{
+	struct wl_closure *closure = wl_connection_demarshal_common(connection,
+								    size,
+								    objects,
+								    message,
+								    handle_new_id,
+								    data);
+	wl_closure_destroy(closure);
+}
+
 bool
 wl_object_is_zombie(struct wl_map *map, uint32_t id)
 {
-	uint32_t flags;
-
-	/* Zombie objects only exist on the client side. */
-	if (map->side == WL_MAP_SERVER_SIDE)
-		return false;
-
-	/* Zombie objects can only have been created by the client. */
-	if (id >= WL_SERVER_ID_START)
-		return false;
-
-	flags = wl_map_lookup_flags(map, id);
-	return !!(flags & WL_MAP_ENTRY_ZOMBIE);
+	return wl_map_lookup_zombie(map, id) != NULL;
 }
 
 int
@@ -916,7 +950,7 @@ wl_closure_lookup_objects(struct wl_closure *closure, struct wl_map *objects)
 			object = wl_map_lookup(objects, id);
 			if (wl_object_is_zombie(objects, id)) {
 				/* references object we've already
-				 * destroyed client side */
+				 * destroyed */
 				object = NULL;
 			} else if (object == NULL && id != 0) {
 				wl_log("unknown object (%u), message %s(%s)\n",
