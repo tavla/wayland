@@ -30,6 +30,113 @@
 #include "wayland-private.h"
 #include "test-runner.h"
 
+TEST(map_zombie_list)
+{
+	struct wl_map map;
+	uint32_t i, j, k, l, m, n, a, b, c, d, e, f;
+	struct wl_interface az, bz, cz;
+
+	/* This setenv has to happen before any wl_map_zombify calls: */
+	assert(setenv("WAYLAND_MAX_ZOMBIE_LIST_COUNT","2",1) == 0);
+
+	wl_map_init(&map, WL_MAP_SERVER_SIDE);
+	i = wl_map_insert_new(&map, 0, &a);
+	j = wl_map_insert_new(&map, 0, &b);
+	k = wl_map_insert_new(&map, 0, &c);
+	assert(i == WL_SERVER_ID_START);
+	assert(j == WL_SERVER_ID_START + 1);
+	assert(k == WL_SERVER_ID_START + 2);
+
+	assert(wl_map_lookup(&map, i) == &a);
+	assert(wl_map_lookup_zombie(&map, i) == NULL);
+	assert(wl_map_lookup(&map, j) == &b);
+	assert(wl_map_lookup_zombie(&map, j) == NULL);
+	assert(wl_map_lookup(&map, k) == &c);
+	assert(wl_map_lookup_zombie(&map, k) == NULL);
+
+
+	assert(map.zombie_list_count == 0);
+
+	assert(wl_map_zombify(&map, WL_SERVER_ID_START + 3, NULL) != 0);
+
+	assert(wl_map_zombify(&map, i, &az) == 0);
+	assert(wl_map_lookup(&map, i) == NULL);
+	assert(wl_map_lookup_zombie(&map, i) == &az);
+	assert(map.zombie_list_count == 1);
+
+	l = wl_map_insert_new(&map, 0, &d);
+	assert(l == WL_SERVER_ID_START + 3);
+	assert(wl_map_lookup(&map, l) == &d);
+	assert(map.zombie_list_count == 1);
+
+	assert(wl_map_zombify(&map, j, &bz) == 0);
+	assert(wl_map_lookup(&map, j) == NULL);
+	assert(wl_map_lookup_zombie(&map, j) == &bz);
+	assert(map.zombie_list_count == 2);
+
+	m = wl_map_insert_new(&map, 0, &e);
+	assert(m == WL_SERVER_ID_START + 4);
+	assert(wl_map_lookup(&map, m) == &e);
+	assert(map.zombie_list_count == 2);
+
+	assert(wl_map_zombify(&map, k, &cz) == 0);
+	assert(wl_map_lookup(&map, k) == NULL);
+	assert(wl_map_lookup_zombie(&map, k) == &cz);
+	assert(map.zombie_list_count == 2);
+
+	n = wl_map_insert_new(&map, 0, &f);
+	assert(n == WL_SERVER_ID_START);
+	assert(wl_map_lookup(&map, n) == &f);
+	assert(map.zombie_list_count == 2);
+
+	wl_map_release(&map);
+}
+
+TEST(map_mark_deleted)
+{
+	struct wl_map map;
+	uint32_t i, j, k, a, b, c;
+	struct wl_interface az, bz;
+
+	wl_map_init(&map, WL_MAP_SERVER_SIDE);
+	assert(wl_map_mark_deleted(&map, WL_SERVER_ID_START) != 0);
+	i = wl_map_insert_new(&map, 0, &a);
+	assert(i == WL_SERVER_ID_START);
+	assert(map.zombie_list_count == 0);
+
+	assert(wl_map_lookup(&map, i) == &a);
+
+	assert(wl_map_mark_deleted(&map, i) == 0);
+	assert(map.zombie_list_count == -1); /* turned off by above */
+	assert(wl_map_lookup(&map, i) == &a);
+	assert(wl_map_lookup_zombie(&map, i) == NULL);
+
+	assert(wl_map_zombify(&map, i, &az) == 0);
+	assert(wl_map_lookup(&map, i) == NULL);
+	assert(wl_map_lookup_zombie(&map, i) == NULL);
+	assert(map.zombie_list_count == -1);
+
+
+	j = wl_map_insert_new(&map, 0, &b);
+	assert(j == WL_SERVER_ID_START);
+	assert(wl_map_lookup(&map, j) == &b);
+
+	assert(wl_map_zombify(&map, j, &bz) == 0);
+	assert(map.zombie_list_count == -1);
+	assert(wl_map_lookup(&map, j) == NULL);
+	assert(wl_map_lookup_zombie(&map, j) == &bz);
+
+	assert(wl_map_mark_deleted(&map, j) == 0);
+	assert(wl_map_lookup(&map, j) == NULL);
+	assert(wl_map_lookup_zombie(&map, j) == NULL);
+
+
+	k = wl_map_insert_new(&map, 0, &c);
+	assert(k == WL_SERVER_ID_START);
+
+	wl_map_release(&map);
+}
+
 TEST(map_insert_new)
 {
 	struct wl_map map;
