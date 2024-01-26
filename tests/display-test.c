@@ -41,6 +41,7 @@
 
 #include <pthread.h>
 #include <poll.h>
+#include <fcntl.h>
 
 #include "wayland-private.h"
 #include "wayland-server.h"
@@ -1708,5 +1709,460 @@ TEST(no_source_terminate)
 	wl_event_loop_add_idle(loop, terminate_display, d->wl_display);
 
 	display_run(d);
+	display_destroy(d);
+}
+
+
+struct zombie_init *zinit_global = NULL;
+
+/* snz: server needs zombies test - demonstrate that the server has a
+   need for zombies for the same reason as the client: proper
+   demarshalling of fds in the wire protocol so that they continue to
+   appear as the args to requests they're supposed to be args to. */
+
+static void
+snz_have_an_fd_event(void *data, struct zombie_target *target, int32_t fd)
+{
+	assert(false); /* not used in snz test */
+}
+
+static void
+snz_have_a_new_id_event(void *data, struct zombie_target *target,
+				  struct zombie_target *the_id)
+{
+	assert(false); /* not used in snz test */
+}
+
+bool snz_test_done = false;
+
+static void
+snz_destruct_event(void *data, struct zombie_target *target)
+{
+	zombie_target_destroy(target);
+	snz_test_done = true;
+	/* send a final fd that is writable to the server to try
+	   writing.  If it writes the previous one in the wire (sent
+	   by snz_new_obj_event) by mistake, it will fail because that
+	   one is RO. */
+	zombie_init_try_this_fd_request(zinit_global, fileno(stderr));
+}
+
+static const struct zombie_target_listener snz_target_listener = {
+	snz_have_an_fd_event,
+	snz_have_a_new_id_event,
+	snz_destruct_event,
+};
+
+static void
+snz_new_obj_event(void *data, struct zombie_init *zinit, struct zombie_target *target)
+{
+	zombie_init_got_it_request(zinit, target);
+	assert(zombie_target_add_listener(target, &snz_target_listener, NULL)==0);
+	/* Use the current dir as a read-only fd to send to the
+	   zombie.  This happens before we send a writable fd (stderr,
+	   sent by snz_destruct_event), so if this fd is not
+	   demarshalled properly, an attempt to write to the supposed
+	   second fd would fail. */
+	int rofd = open(".", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+	zombie_target_have_an_fd_request(target, rofd);
+	close(rofd);
+}
+
+static void
+snz_got_it_event(void *data, struct zombie_init *zinit,
+			   struct zombie_target *target)
+{
+	/*noop for snz test*/
+}
+
+static void
+snz_try_this_fd_event(void *data, struct zombie_init *zinit, int32_t fd)
+{
+	assert(false); /* not used for snz test */
+}
+
+static const struct zombie_init_listener snz_init_listener = {
+	snz_new_obj_event,
+	snz_got_it_event,
+	snz_try_this_fd_event,
+};
+
+static void
+snz_handle_globals(void *data, struct wl_registry *registry,
+			     uint32_t id, const char *intf, uint32_t ver)
+{
+	if (!strcmp(intf, "zombie_init")) {
+		zinit_global = wl_registry_bind(registry, id, &zombie_init_interface, 1);
+		zombie_init_add_listener(zinit_global, &snz_init_listener, NULL);
+	}
+}
+
+static const struct wl_registry_listener snz_registry_listener = {
+	snz_handle_globals,
+	NULL,
+};
+
+static void
+snz_client_loop(void *data)
+{
+	struct client *c = client_connect();
+	struct wl_registry *registry;
+
+	registry = wl_display_get_registry(c->wl_display);
+	wl_registry_add_listener(registry, &snz_registry_listener, NULL);
+
+	while (!snz_test_done)
+		if (wl_display_roundtrip(c->wl_display) < 0)
+			assert(false && "snz client loop killed off");
+
+	assert(zinit_global);
+	zombie_init_destroy(zinit_global);
+
+	wl_registry_destroy(registry);
+
+	client_disconnect_nocheck(c);
+}
+
+static void
+snz_init_new_obj_request(struct wl_client *client, struct wl_resource *resource,
+			      uint32_t the_object)
+{
+	assert(false); /* not used in snz test */
+}
+
+static void
+snz_init_got_it_request(struct wl_client *client, struct wl_resource *resource,
+			     struct wl_resource *target)
+{
+	/* this should make target a zombie, if the server had zombies */
+	zombie_target_send_destruct_event(target);
+	wl_resource_destroy(target);
+}
+
+bool snz_got_try_this_fd_request = false;
+
+static const char finalmsg[] = "This write proves we demarshalled fds properly\n";
+
+static void
+snz_try_this_fd_request(struct wl_client *client, struct wl_resource *resource, int32_t fd)
+{
+	/* If writing this fd fails, that's because it's the wrong fd
+	   left on the wire from a previous request that wasn't
+	   demarshalled properly */
+	assert(write(fd, finalmsg, sizeof finalmsg) == sizeof finalmsg);
+	fsync(fd);
+	close(fd);
+	snz_got_try_this_fd_request = true;
+}
+
+static const struct zombie_init_interface snz_init_interface = {
+	snz_init_new_obj_request,
+	snz_init_got_it_request,
+	snz_try_this_fd_request,
+};
+
+static void
+snz_zombie_init_destroy(struct wl_resource *res)
+{
+}
+
+static void
+snz_target_have_an_fd_request(struct wl_client *client, struct wl_resource *resource,
+			      int32_t fd)
+{
+	/* noop */
+}
+
+static void
+snz_target_destruct_request(struct wl_client *client, struct wl_resource *resource)
+{
+	assert(false); /* not used in snz test */
+}
+
+static const struct zombie_target_interface snz_target_interface = {
+	snz_target_have_an_fd_request,
+	snz_target_destruct_request,
+};
+
+static void
+snz_zombie_target_destroy(struct wl_resource *res)
+{
+}
+
+static void
+bind_snz(struct wl_client *client, void *data,
+	 uint32_t vers, uint32_t id)
+{
+	struct wl_resource *init, *target;
+	init = wl_resource_create(client, &zombie_init_interface, vers, id);
+	wl_resource_set_implementation(init, &snz_init_interface, NULL,
+				       snz_zombie_init_destroy);
+	assert(init);
+	target = wl_resource_create(client, &zombie_target_interface, 1, 0);
+	wl_resource_set_implementation(target, &snz_target_interface, NULL,
+				       snz_zombie_target_destroy);
+	zombie_init_send_new_obj_event(init, target);
+}
+
+TEST(server_needs_zombies) /*snz*/
+{
+	struct display *d;
+	struct wl_global *g;
+
+	snz_got_try_this_fd_request = false;
+
+	d = display_create();
+
+	g = wl_global_create(d->wl_display, &zombie_init_interface,
+			     1, d, bind_snz);
+
+
+	client_create_noarg(d, snz_client_loop);
+
+	display_run(d);
+
+	assert(snz_got_try_this_fd_request);
+
+	wl_global_destroy(g);
+
+	display_destroy(d);
+}
+
+
+/*zde: zombie domino effect test - show that properly demarshalling fds
+  is not the only job that zombies should have - they also need to
+  make new_id args into zombies, else an fd sent to one of them will
+  get left in the wire and foul things up. */
+
+static void
+zde_have_an_fd_event(void *data, struct zombie_target *target, int32_t fd)
+{
+	/*if we get here, then the zde passes!*/
+}
+
+static void
+zde_have_a_new_id_event(void *data, struct zombie_target *target,
+			struct zombie_target *the_id)
+{
+	/*noop - but demarshalling this must zombify the_id to avoid eventual failure */
+}
+
+static void
+zde_destruct_event(void *data, struct zombie_target *target)
+{
+	assert(false); /*not used by zde test */
+}
+
+static const struct zombie_target_listener zde_target_listener = {
+	zde_have_an_fd_event,
+	zde_have_a_new_id_event,
+	zde_destruct_event,
+};
+
+static void
+zde_new_obj_event(void *data, struct zombie_init *zinit, struct zombie_target *target)
+{
+	assert(false); /* not used in zde test */
+}
+
+static void
+zde_got_it_event(void *data, struct zombie_init *zinit, struct zombie_target *target)
+{
+	/*noop*/
+}
+
+bool zde_test_done = false;
+
+static void
+zde_try_this_fd_event(void *data, struct zombie_init *zinit, int32_t fd)
+{
+	zde_test_done = true;
+	/* if writing this fd fails, that's because it's the wrong fd
+	   left in the wire by improperly demarshalling an event sent
+	   to a new_id that should have become a zombie but didn't */
+	assert(write(fd, finalmsg, sizeof finalmsg) == sizeof finalmsg);
+	zombie_init_try_this_fd_request(zinit_global, fd);
+	fsync(fd);
+	close(fd);
+}
+
+static const struct zombie_init_listener zde_init_listener = {
+	zde_new_obj_event,
+	zde_got_it_event,
+	zde_try_this_fd_event,
+};
+
+static void
+zde_handle_globals(void *data, struct wl_registry *registry,
+		   uint32_t id, const char *intf, uint32_t ver)
+{
+	if (!strcmp(intf, "zombie_init")) {
+		zinit_global = wl_registry_bind(registry, id, &zombie_init_interface, 1);
+		zombie_init_add_listener(zinit_global, &zde_init_listener, NULL);
+	}
+}
+
+static const struct wl_registry_listener zde_registry_listener = {
+	zde_handle_globals,
+	NULL,
+};
+
+static void
+zde_client_loop(void *data)
+{
+	struct client *c = client_connect();
+	struct wl_registry *registry;
+	zinit_global = NULL;
+
+	registry = wl_display_get_registry(c->wl_display);
+	wl_registry_add_listener(registry, &zde_registry_listener, NULL);
+
+	while (!zinit_global &&
+	       wl_display_roundtrip(c->wl_display) > 0);
+
+	struct zombie_target *target = zombie_init_new_obj_request(zinit_global);
+	zombie_target_add_listener(target, &zde_target_listener, NULL);
+
+	/*make target into a zombie */
+	zombie_target_destruct_request(target);
+	zombie_target_destroy(target);
+
+	while (!zde_test_done)
+		if (wl_display_roundtrip(c->wl_display) < 0)
+			assert(false && "zde client loop killed off");
+
+	/*once more, with feeling:*/
+	assert(wl_display_roundtrip(c->wl_display) > 0);
+
+	zombie_init_destroy(zinit_global);
+
+	wl_registry_destroy(registry);
+
+	client_disconnect_nocheck(c);
+}
+
+static void
+zde_target_have_an_fd_request(struct wl_client *client, struct wl_resource *resource,
+			      int32_t fd)
+{
+	assert(false); /* not used in zde test */
+}
+
+static void
+zde_zombie_target_destroy(struct wl_resource *res)
+{
+	/*noop*/
+}
+
+static void
+zde_target_destruct_request(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static const struct zombie_target_interface zde_target_interface = {
+	zde_target_have_an_fd_request,
+	zde_target_destruct_request,
+};
+
+const int num_domino_new_ids = 3;
+
+static void
+zde_init_new_obj_request(struct wl_client *client, struct wl_resource *resource,
+			      uint32_t the_object)
+{
+	int i;
+	struct wl_resource *target =
+		wl_resource_create(client, &zombie_target_interface, 1, the_object);
+	struct wl_resource *next_target = NULL;
+
+	assert(target);
+	wl_resource_set_implementation(target, &zde_target_interface, NULL,
+				       zde_zombie_target_destroy);
+	zombie_init_send_got_it_event(resource, target);
+
+	/* the dominos: send a chain of new_id events...*/
+	for (i = 1; i <= num_domino_new_ids; i++) {
+		next_target = wl_resource_create(client, &zombie_target_interface, 1, 0);
+		wl_resource_set_implementation(next_target, &zde_target_interface, NULL,
+					       zde_zombie_target_destroy);
+		zombie_target_send_have_a_new_id_event(target, next_target);
+		target = next_target;
+	}
+
+	/* open the current dir read-only and send it as the fd to the
+	   zombie.  This happens before we send a writable fd
+	   (stderr), so if this fd is not demarshalled properly, an
+	   attempt to write to the supposed second fd would fail. */
+	int rofd = open(".", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+	zombie_target_send_have_an_fd_event(target, rofd);
+	close(rofd);
+
+	/* one last round-trip to make sure the client survived: */
+	zombie_init_send_try_this_fd_event(resource, fileno(stderr));
+}
+
+static void
+zde_init_got_it_request(struct wl_client *client, struct wl_resource *resource,
+			struct wl_resource *target)
+{
+	assert(false); /* not used in zde test */
+}
+
+bool zde_got_try_this_fd_request = false;
+
+static void
+zde_try_this_fd_request(struct wl_client *client, struct wl_resource *resource,
+			int32_t fd)
+{
+	/* this is redundant with zde_try_this_fd_event, but why not try it as well */
+	assert(write(fd, finalmsg, sizeof finalmsg) == sizeof finalmsg);
+	fsync(fd);
+	close(fd);
+	zde_got_try_this_fd_request = true;
+}
+
+static const struct zombie_init_interface zde_init_interface = {
+	zde_init_new_obj_request,
+	zde_init_got_it_request,
+	zde_try_this_fd_request,
+};
+
+static void
+zde_zombie_init_destroy(struct wl_resource *res)
+{
+}
+
+static void
+bind_zde(struct wl_client *client, void *data,
+	 uint32_t vers, uint32_t id)
+{
+	struct wl_resource *init;
+	init = wl_resource_create(client, &zombie_init_interface, vers, id);
+	wl_resource_set_implementation(init, &zde_init_interface, NULL,
+				       zde_zombie_init_destroy);
+	assert(init);
+}
+
+TEST(zombie_domino_effect) /*zde*/
+{
+	struct display *d;
+	struct wl_global *g;
+
+	zde_got_try_this_fd_request = false;
+
+	d = display_create();
+
+	g = wl_global_create(d->wl_display, &zombie_init_interface,
+			     1, d, bind_zde);
+
+	client_create_noarg(d, zde_client_loop);
+
+	display_run(d);
+
+	assert(zde_got_try_this_fd_request);
+
+	wl_global_destroy(g);
+
 	display_destroy(d);
 }
