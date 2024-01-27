@@ -818,6 +818,11 @@ TEST(request_bogus_size)
 
 	test_set_timeout(1);
 
+	/* Because this test reads the expected error off the wire
+	   directly without anticipating any prior event from the
+	   server, turn off the delete_id handshake event: */
+	assert(setenv("WAYLAND_SERVER_DELETE_ID_HANDSHAKE","0",1) == 0);
+
 	/*
 	 * The manufactured message has real size 12. Test all bogus sizes
 	 * smaller than that, and zero as the last one since wl_closure_init

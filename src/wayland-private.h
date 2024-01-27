@@ -47,6 +47,7 @@
 #define WL_SERVER_ID_START 0xff000000
 #define WL_MAP_MAX_OBJECTS 0x00f00000
 #define WL_CLOSURE_MAX_ARGS 20
+#define WL_DELETE_ID_HANDSHAKE 0xffffffff
 
 struct wl_object {
 	const struct wl_interface *interface;
@@ -99,6 +100,9 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i);
 
 int
 wl_map_zombify(struct wl_map *map, uint32_t i, const struct wl_interface *interface);
+
+void
+wl_map_disable_zombie_list(struct wl_map *map);
 
 int
 wl_map_mark_deleted(struct wl_map *map, uint32_t i);

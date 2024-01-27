@@ -104,6 +104,7 @@ struct wl_display {
 	int reader_count;
 	uint32_t read_serial;
 	pthread_cond_t reader_cond;
+	bool use_sync_for_delete_id_requests;
 };
 
 /** \endcond */
@@ -495,11 +496,74 @@ wl_proxy_create_for_id(struct wl_proxy *factory,
 	return proxy;
 }
 
+/* In the current protocol, the client has no equivalent to a
+ * wl_display delete_id event.  But it can benefit from one.  Here we
+ * hijack the wl_display sync request such that the client will send a
+ * sync with a server id instead of a client id, which will indicate
+ * it is really being used as a delete_id request.  The client will
+ * only do this if the server had previously sent a delete_id event
+ * for WL_DELETE_ID_HANDSHAKE, indicating it would accept such
+ * hijacked syncs.  */
+static void
+marshal_fake_sync_for_delete_id(struct wl_display *display, uint32_t id)
+{
+	if (id < WL_SERVER_ID_START) {
+		wl_log("error: marshal_fake_sync_for_delete_id on client id %u\n", id);
+		return;
+	}
+
+	/* We have to call wl_closure_marshal directly because we
+	 * already have the display mutex */
+
+	struct wl_proxy *proxy = &display->proxy;
+	const struct wl_message *message =
+		&proxy->object.interface->methods[WL_DISPLAY_SYNC];
+
+	union wl_argument arg;
+	struct wl_closure *closure;
+	/* Even though the sync request takes a new_id arg,
+	 * wl_closure_marshal wants an obj arg for the new_id arg,
+	 * meaning it wants an actual object instead of an id.  So we
+	 * fake up an object.  Fortunately, it only uses the id
+	 * field. */
+	struct wl_object fake_obj;
+	fake_obj.interface = NULL;
+	fake_obj.implementation = NULL;
+	fake_obj.id = id;
+	arg.o = &fake_obj;
+	closure = wl_closure_marshal(&proxy->object, WL_DISPLAY_SYNC, &arg, message);
+
+	if (closure == NULL) {
+		wl_log("Error marshalling request: %s\n", strerror(errno));
+		display_fatal_error(display, errno);
+		return;
+	}
+
+	if (debug_client) {
+		struct wl_event_queue *queue;
+
+		queue = wl_proxy_get_queue(proxy);
+		wl_closure_print(closure, &proxy->object, true, false, NULL,
+				 wl_event_queue_get_name(queue));
+	}
+
+	if (wl_closure_send(closure, display->connection)) {
+		wl_log("Error sending request: %s\n", strerror(errno));
+		display_fatal_error(display, errno);
+	}
+
+	wl_closure_destroy(closure);
+}
+
 static void
 proxy_destroy(struct wl_proxy *proxy)
 {
-	wl_map_zombify(&proxy->display->objects,
-		       proxy->object.id,
+	struct wl_display *display = proxy->display;
+	uint32_t id = proxy->object.id;
+	if (display->use_sync_for_delete_id_requests && id >= WL_SERVER_ID_START)
+		marshal_fake_sync_for_delete_id(display, id);
+
+	wl_map_zombify(&display->objects, id,
 		       proxy->object.interface);
 
 	proxy->flags |= WL_PROXY_FLAG_DESTROYED;
@@ -1031,8 +1095,23 @@ display_handle_delete_id(void *data, struct wl_display *display, uint32_t id)
 {
 	pthread_mutex_lock(&display->mutex);
 
-	if (wl_map_mark_deleted(&display->objects, id) != 0)
+	if (id == WL_DELETE_ID_HANDSHAKE) {
+		/* The server has sent a special "impossible" delete_id event
+		 * to indicate that it can accept delete_id requests.  Note
+		 * that in the display, and reply with a similar delete_id
+		 * request */
+		/* The client doesn't have to return the handshake.
+		 * If it doesn't, the server will learn that the
+		 * client can send delete_id requests the first time
+		 * the client does so, if it does so.  But that might
+		 * be after the server has begun to recycle its IDs.
+		 * Unless the server has a large enough zombie
+		 * ring. */
+		display->use_sync_for_delete_id_requests = true;
+		marshal_fake_sync_for_delete_id(display, id);
+	} else if (wl_map_mark_deleted(&display->objects, id) != 0) {
 		wl_log("error: received delete_id for unknown id (%u)\n", id);
+	}
 
 	pthread_mutex_unlock(&display->mutex);
 }
@@ -1144,6 +1223,7 @@ wl_display_connect_to_fd(int fd)
 	pthread_mutex_init(&display->mutex, NULL);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
+	display->use_sync_for_delete_id_requests = false;
 
 	if (wl_map_insert_at(&display->objects, 0, 0, NULL) == -1)
 		goto err_connection;
@@ -1471,6 +1551,9 @@ zombify_new_id(void *displayp, uint32_t id, const struct wl_interface *interface
 			return -1;
 		}
 		assert(wl_map_lookup_zombie(&display->objects, id) == interface);
+
+		if (display->use_sync_for_delete_id_requests)
+			marshal_fake_sync_for_delete_id(display, id);
 
 		return 0;
 	} else {

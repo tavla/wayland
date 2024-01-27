@@ -359,6 +359,22 @@ zombify_new_id_queue_delete_id_event(void *clientp, uint32_t id,
 	}
 }
 
+/* Only used for demarshalling wl_display sync messages */
+static int
+handle_new_id_for_sync(void *data, uint32_t id, const struct wl_interface *interface)
+{
+	struct wl_map *objects = data;
+
+	if (id >= WL_SERVER_ID_START)
+		/* Assume this is being called do to a sync request
+		 * that is really a delete_id request - which will be
+		 * handled in display_sync.
+		 */
+		return 0;
+
+	return wl_map_reserve_new(objects, id);
+}
+
 static int
 wl_client_connection_data(int fd, uint32_t mask, void *data)
 {
@@ -467,9 +483,24 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 			break;
 		}
 
-
-		closure = wl_connection_demarshal(client->connection, size,
-						  &client->objects, message);
+		if (resource == client->display_resource &&
+		    strcmp(message->name,"sync") == 0)
+			/* This is a wl_display::sync message, which
+			 * might be being used as a delete_id request.
+			 * Avoid declaring a server ID in the new_ID
+			 * field as an error by using
+			 * handle_new_id_for_sync as the new_id
+			 * handler.  Would be nice to use opcode ==
+			 * WL_DISPLAY_SYNC, but WL_DISPLAY_SYNC only
+			 * gets defined for clients.
+			 */
+			closure = wl_connection_demarshal_common(client->connection, size,
+								 &client->objects, message,
+								 &handle_new_id_for_sync,
+								 &client->objects);
+		else
+			closure = wl_connection_demarshal(client->connection, size,
+							  &client->objects, message);
 
 		if (closure == NULL && errno == ENOMEM) {
 			wl_resource_post_no_memory(resource);
@@ -575,6 +606,8 @@ WL_EXPORT struct wl_client *
 wl_client_create(struct wl_display *display, int fd)
 {
 	struct wl_client *client;
+	bool do_delete_id_handshake = false;
+	const char *env;
 
 	client = zalloc(sizeof *client);
 	if (client == NULL)
@@ -610,6 +643,28 @@ wl_client_create(struct wl_display *display, int fd)
 	wl_list_insert(display->client_list.prev, &client->link);
 
 	wl_priv_signal_emit(&display->create_client_signal, client);
+
+	env = getenv("WAYLAND_SERVER_DELETE_ID_HANDSHAKE");
+	if (env && (strcmp(env,"0")==0 || strcasecmp(env,"no")==0 ||
+		    strcasecmp(env,"false")==0))
+		do_delete_id_handshake = false;
+	else
+		do_delete_id_handshake = true;
+
+	if (do_delete_id_handshake) {
+		/* Send the client a fake delete_id event with id
+		 * WL_DELETE_ID_HANDSHAKE so that a patched client
+		 * will know this is a patched server that can handle
+		 * delete_id requests.  Unpatched clients will log
+		 * this but otherwise ignore it.  Patched clients will
+		 * reply with the same id in a delete_id request(!),
+		 * to indicate that they will take the responsibility
+		 * to send future delete_id requests.
+		 */
+		wl_resource_queue_event(client->display_resource,
+					WL_DISPLAY_DELETE_ID,
+					WL_DELETE_ID_HANDSHAKE);
+	}
 
 	return client;
 
@@ -1078,6 +1133,23 @@ display_sync(struct wl_client *client,
 {
 	struct wl_resource *callback;
 	uint32_t serial;
+
+	if (id >= WL_SERVER_ID_START) {
+		/* This is not a sync request.  It's really a
+		   delete_id request.  A true sync request would have
+		   a client id instead. */
+		if (id == WL_DELETE_ID_HANDSHAKE) {
+			/* the id == WL_DELETE_ID_HANDSHAKE case is only to tell
+			 * us that the client will send other delete_id requests
+			 * later
+			 */
+			wl_map_disable_zombie_list(&client->objects);
+		}
+		else if (wl_map_mark_deleted(&client->objects, id) != 0)
+			wl_log("error: received delete_id for unknown id (%u)\n", id);
+
+		return;
+	}
 
 	callback = wl_resource_create(client, &wl_callback_interface, 1, id);
 	if (callback == NULL) {

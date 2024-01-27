@@ -59,6 +59,13 @@ struct message {
 	const char *message_name;
 	int args_count;
 } messages[] = {
+	{ /* this is the WAYLAND_SERVER_DELETE_ID_HANDSHAKE message */
+		.type = WL_PROTOCOL_LOGGER_EVENT,
+		.class = "wl_display",
+		.opcode = 1,
+		.message_name = "delete_id",
+		.args_count = 1,
+	},
 	{
 		.type = WL_PROTOCOL_LOGGER_REQUEST,
 		.class = "wl_display",

@@ -443,6 +443,13 @@ wl_map_zombify(struct wl_map *map, uint32_t i, const struct wl_interface *interf
 	return 0;
 }
 
+
+void
+wl_map_disable_zombie_list(struct wl_map *map)
+{
+	map->zombie_list_count = -1;
+}
+
 int
 wl_map_mark_deleted(struct wl_map *map, uint32_t i)
 {
@@ -475,7 +482,7 @@ wl_map_mark_deleted(struct wl_map *map, uint32_t i)
 	   needed if we are receiving delete_id messages, and is
 	   incompatible with randomly moving zombies directly to the
 	   free list */
-	map->zombie_list_count = -1;
+	wl_map_disable_zombie_list(map);
 
 	start[i].deleted = 1;
 	if (start[i].zombie) {
