@@ -85,6 +85,8 @@ struct wl_client {
 	gid_t gid;
 	bool error;
 	struct wl_priv_signal resource_created_signal;
+	int pidfd;
+	void *data;
 };
 
 struct wl_display {
@@ -527,6 +529,7 @@ wl_client_create(struct wl_display *display, int fd)
 
 	wl_priv_signal_init(&client->resource_created_signal);
 	client->display = display;
+	client->data = NULL;
 	client->source = wl_event_loop_add_fd(display->loop, fd,
 					      WL_EVENT_READABLE,
 					      wl_client_connection_data, client);
@@ -536,6 +539,9 @@ wl_client_create(struct wl_display *display, int fd)
 
 	if (wl_os_socket_peercred(fd, &client->uid, &client->gid,
 				  &client->pid) != 0)
+		goto err_source;
+
+	if (wl_os_socket_peerpidfd(fd, &client->pidfd) != 0)
 		goto err_source;
 
 	client->connection = wl_connection_create(fd);
@@ -600,6 +606,30 @@ wl_client_get_credentials(struct wl_client *client,
 		*uid = client->uid;
 	if (gid)
 		*gid = client->gid;
+}
+
+/** Return pidfd for the client
+ *
+ * \param client The display object
+ * \param pidfd Returns the pidfd
+ *
+ * This function returns the process pidfd
+ * for the given client.  The credentials come from getsockopt() with
+ * SO_PEERPIDFD, on the client socket fd. If the system does not support
+ * SO_PEERPIDFD -1 is written to the pidfd parameter. The caller is not
+ * responsibly for closing the fd.
+ *
+ * Be aware that for clients that a compositor forks and execs and then
+ * connects using socketpair(), this function will return the pidfd for
+ * the compositor. The pidfd for the socketpair is set at creation time in
+ * the compositor.
+ *
+ * \memberof wl_client
+ */
+WL_EXPORT void
+wl_client_get_pidfd(struct wl_client *client, int *pidfd)
+{
+	*pidfd = client->pidfd;
 }
 
 /** Get the file descriptor for the client
@@ -943,6 +973,8 @@ wl_client_destroy(struct wl_client *client)
 
 	wl_list_remove(&client->link);
 	wl_list_remove(&client->resource_created_signal.listener_list);
+	if (client->pidfd != -1)
+		close(client->pidfd);
 	free(client);
 }
 
@@ -2467,6 +2499,18 @@ wl_client_new_object(struct wl_client *client,
 					       implementation, data, NULL);
 
 	return resource;
+}
+
+WL_EXPORT void
+wl_client_set_user_data(struct wl_client *client, void *data)
+{
+	client->data = data;
+}
+
+WL_EXPORT void *
+wl_client_get_user_data(struct wl_client *client)
+{
+	return client->data;
 }
 
 struct wl_global *

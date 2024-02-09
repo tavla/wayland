@@ -126,6 +126,20 @@ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 #endif
 
 int
+wl_os_socket_peerpidfd(int sockfd, int *pidfd)
+{
+#if defined(SO_PEERPIDFD)
+	socklen_t len;
+
+	len = sizeof(*pidfd);
+	return getsockopt(sockfd, SOL_SOCKET, SO_PEERPIDFD, pidfd, &len);
+#else
+	*pidfd = -1;
+	return 0;
+#endif
+}
+
+int
 wl_os_dupfd_cloexec(int fd, int minfd)
 {
 	int newfd;

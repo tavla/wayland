@@ -323,6 +323,9 @@ void
 wl_client_get_credentials(struct wl_client *client,
 			  pid_t *pid, uid_t *uid, gid_t *gid);
 
+void
+wl_client_get_pidfd(struct wl_client *client, int *pidfd);
+
 int
 wl_client_get_fd(struct wl_client *client);
 
@@ -364,6 +367,12 @@ void
 wl_client_for_each_resource(struct wl_client *client,
                             wl_client_for_each_resource_iterator_func_t iterator,
                             void *user_data);
+
+void
+wl_client_set_user_data(struct wl_client *client, void *data);
+
+void *
+wl_client_get_user_data(struct wl_client *client);
 
 /** \class wl_listener
  *
