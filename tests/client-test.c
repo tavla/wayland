@@ -158,3 +158,47 @@ TEST(client_destroy_listener)
 	wl_display_destroy(display);
 }
 
+struct event_dispatch_listener {
+	struct wl_listener listener;
+	bool done;
+};
+
+static void
+event_dispatch_notify(struct wl_listener *l, void *data)
+{
+	struct event_dispatch_listener *listener =
+		wl_container_of(l, listener, listener);
+	listener->done = true;
+}
+
+TEST(event_dispatch_listener)
+{
+	struct wl_display *display;
+	struct wl_client *client;
+	struct wl_resource *resource;
+	struct event_dispatch_listener dispatch_listener;
+	int s[2];
+
+	assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, s) == 0);
+	display = wl_display_create();
+	assert(display);
+	client = wl_client_create(display, s[0]);
+	assert(client);
+
+	dispatch_listener.listener.notify = event_dispatch_notify;
+	dispatch_listener.done = false;
+	wl_client_add_event_dispatch_listener(client, &dispatch_listener.listener);
+
+	resource = wl_resource_create(client, &wl_seat_interface, 4, 0);
+	assert(resource);
+	wl_seat_send_name(resource, "default");
+
+	wl_event_loop_dispatch(wl_display_get_event_loop(display), 0);
+
+	assert(dispatch_listener.done);
+
+	close(s[1]);
+	wl_client_destroy(client);
+	wl_display_destroy(display);
+}
+
