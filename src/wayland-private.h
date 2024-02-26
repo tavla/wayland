@@ -151,6 +151,8 @@ struct wl_closure {
 struct argument_details {
 	char type;
 	int nullable;
+	char element_type;
+	int element_bits;
 };
 
 const char *

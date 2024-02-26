@@ -127,6 +127,8 @@ struct wl_object;
  * * `a`: array
  * * `h`: fd
  * * `?`: following argument (`o` or `s`) is nullable
+ * * `[i32]`: the preceding array argument has 32 bit signed integer elements
+ * * `[u8]`: the preceding array argument has 8 bit unsigned integer elements
  *
  * While demarshaling primitive arguments is straightforward, when demarshaling
  * messages containing `object` or `new_id` arguments, the protocol
