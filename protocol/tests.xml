@@ -49,4 +49,54 @@
       <arg name="passer" type="object" interface="fd_passer"/>
     </request>
   </interface>
+
+  <interface name="zombie_init" version="1">
+    <description summary="Set up zombie server and domino-effect tests">
+      A way to get these tests started.
+    </description>
+
+    <event name="new_obj_event">
+      <description summary="create a new object on the server"/>
+      <arg name="the_object" type="new_id" interface="zombie_target"/>
+    </event>
+
+    <request name="new_obj_request">
+      <description summary="create a new object on the client"/>
+      <arg name="the_object" type="new_id" interface="zombie_target"/>
+    </request>
+
+    <event name="got_it_event">
+      <arg name="target" type="object" interface="zombie_target"/>
+    </event>
+    <request name="got_it_request">
+
+      <arg name="target" type="object" interface="zombie_target"/>
+    </request>
+
+    <request name="try_this_fd_request">
+      <arg name="fd" type="fd" summary="file descriptor"/>
+    </request>
+    <event name="try_this_fd_event">
+      <arg name="fd" type="fd" summary="file descriptor"/>
+    </event>
+  </interface>
+
+  <interface name="zombie_target" version="1">
+    <description summary="object that will or should become a zombie"/>
+
+    <request name="have_an_fd_request">
+      <arg name="fd" type="fd" summary="file descriptor"/>
+    </request>
+
+    <event name="have_an_fd_event">
+      <arg name="fd" type="fd" summary="file descriptor"/>
+    </event>
+
+    <event name="have_a_new_id_event">
+      <arg name="the_id" type="new_id" interface="zombie_target"/>
+    </event>
+
+    <request name="destruct_request" type="destuctor"/>
+    <event name="destruct_event" type="destructor"/>
+  </interface>
 </protocol>

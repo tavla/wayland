@@ -327,6 +327,54 @@ destroy_client_with_error(struct wl_client *client, const char *reason)
 	wl_client_destroy(client);
 }
 
+/* zombify_new_id_queue_delete_id_event is only called by
+ * wl_connection_demarshal_zombie when the request it is demarhsalling
+ * has new_id argments, meaning they're client IDs.  Those client IDs
+ * need to have zombies created for them in case the client
+ * subsequently sends a request to them, which might contain fds or
+ * more new_ids. */
+static int
+zombify_new_id_queue_delete_id_event(void *clientp, uint32_t id,
+				     const struct wl_interface *interface)
+{
+	struct wl_client *client = clientp;
+
+	if (id < WL_SERVER_ID_START) {
+		if (wl_map_insert_at(&client->objects, 0, id, (void*)interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (wl_map_zombify(&client->objects, id, interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (client->display_resource)
+			wl_resource_queue_event(client->display_resource,
+						WL_DISPLAY_DELETE_ID, id);
+
+		return 0;
+	} else {
+		/* Unexpected: the id is a server ID. */
+		return -1;
+	}
+}
+
+/* Only used for demarshalling wl_display sync messages */
+static int
+handle_new_id_for_sync(void *data, uint32_t id, const struct wl_interface *interface)
+{
+	struct wl_map *objects = data;
+
+	if (id >= WL_SERVER_ID_START)
+		/* Assume this is being called do to a sync request
+		 * that is really a delete_id request - which will be
+		 * handled in display_sync.
+		 */
+		return 0;
+
+	return wl_map_reserve_new(objects, id);
+}
+
 static int
 wl_client_connection_data(int fd, uint32_t mask, void *data)
 {
@@ -340,6 +388,7 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	uint32_t resource_flags;
 	int opcode, size, since;
 	int len;
+	const struct wl_interface *interface;
 
 	if (mask & WL_EVENT_HANGUP) {
 		wl_client_destroy(client);
@@ -383,9 +432,29 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 		resource = wl_map_lookup(&client->objects, p[0]);
 		resource_flags = wl_map_lookup_flags(&client->objects, p[0]);
 		if (resource == NULL) {
-			wl_resource_post_error(client->display_resource,
-					       WL_DISPLAY_ERROR_INVALID_OBJECT,
-					       "invalid object %u", p[0]);
+			interface = wl_map_lookup_zombie(&client->objects, p[0]);
+			if (interface == NULL) {
+				wl_resource_post_error(client->display_resource,
+						       WL_DISPLAY_ERROR_INVALID_OBJECT,
+						       "invalid object %u", p[0]);
+				break;
+			}
+
+			if (opcode >= interface->method_count) {
+				wl_resource_post_error(client->display_resource,
+						       WL_DISPLAY_ERROR_INVALID_METHOD,
+						       "invalid method %d, object %s#%u",
+						       opcode,
+						       interface->name,
+						       p[0]);
+				break;
+			}
+
+			message = &interface->methods[opcode];
+			wl_connection_demarshal_zombie(client->connection, size,
+						       &client->objects, message,
+						       &zombify_new_id_queue_delete_id_event,
+						       client);
 			break;
 		}
 
@@ -414,9 +483,24 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 			break;
 		}
 
-
-		closure = wl_connection_demarshal(client->connection, size,
-						  &client->objects, message);
+		if (resource == client->display_resource &&
+		    strcmp(message->name,"sync") == 0)
+			/* This is a wl_display::sync message, which
+			 * might be being used as a delete_id request.
+			 * Avoid declaring a server ID in the new_ID
+			 * field as an error by using
+			 * handle_new_id_for_sync as the new_id
+			 * handler.  Would be nice to use opcode ==
+			 * WL_DISPLAY_SYNC, but WL_DISPLAY_SYNC only
+			 * gets defined for clients.
+			 */
+			closure = wl_connection_demarshal_common(client->connection, size,
+								 &client->objects, message,
+								 &handle_new_id_for_sync,
+								 &client->objects);
+		else
+			closure = wl_connection_demarshal(client->connection, size,
+							  &client->objects, message);
 
 		if (closure == NULL && errno == ENOMEM) {
 			wl_resource_post_no_memory(resource);
@@ -522,6 +606,8 @@ WL_EXPORT struct wl_client *
 wl_client_create(struct wl_display *display, int fd)
 {
 	struct wl_client *client;
+	bool do_delete_id_handshake = false;
+	const char *env;
 
 	client = zalloc(sizeof *client);
 	if (client == NULL)
@@ -557,6 +643,28 @@ wl_client_create(struct wl_display *display, int fd)
 	wl_list_insert(display->client_list.prev, &client->link);
 
 	wl_priv_signal_emit(&display->create_client_signal, client);
+
+	env = getenv("WAYLAND_SERVER_DELETE_ID_HANDSHAKE");
+	if (env && (strcmp(env,"0")==0 || strcasecmp(env,"no")==0 ||
+		    strcasecmp(env,"false")==0))
+		do_delete_id_handshake = false;
+	else
+		do_delete_id_handshake = true;
+
+	if (do_delete_id_handshake) {
+		/* Send the client a fake delete_id event with id
+		 * WL_DELETE_ID_HANDSHAKE so that a patched client
+		 * will know this is a patched server that can handle
+		 * delete_id requests.  Unpatched clients will log
+		 * this but otherwise ignore it.  Patched clients will
+		 * reply with the same id in a delete_id request(!),
+		 * to indicate that they will take the responsibility
+		 * to send future delete_id requests.
+		 */
+		wl_resource_queue_event(client->display_resource,
+					WL_DISPLAY_DELETE_ID,
+					WL_DELETE_ID_HANDSHAKE);
+	}
 
 	return client;
 
@@ -735,7 +843,8 @@ remove_and_destroy_resource(void *element, void *data, uint32_t flags)
 {
 	struct wl_resource *resource = element;
 	struct wl_client *client = resource->client;
-	uint32_t id = resource->object.id;;
+	uint32_t id = resource->object.id;
+	const struct wl_interface *interface = resource->object.interface;
 
 	wl_signal_emit(&resource->deprecated_destroy_signal, resource);
 	/* Don't emit the new signal for deprecated resources, as that would
@@ -746,16 +855,12 @@ remove_and_destroy_resource(void *element, void *data, uint32_t flags)
 	if (resource->destroy)
 		resource->destroy(resource);
 
+	if (id < WL_SERVER_ID_START && client->display_resource)
+		wl_resource_queue_event(client->display_resource,
+					WL_DISPLAY_DELETE_ID, id);
+	
 	/* The resource should be cleared from the map before memory is freed. */
-	if (id < WL_SERVER_ID_START) {
-		if (client->display_resource) {
-			wl_resource_queue_event(client->display_resource,
-						WL_DISPLAY_DELETE_ID, id);
-		}
-		wl_map_insert_at(&client->objects, 0, id, NULL);
-	} else {
-		wl_map_remove(&client->objects, id);
-	}
+	wl_map_zombify(&client->objects, id, interface);
 
 	if (!(flags & WL_MAP_ENTRY_LEGACY))
 		free(resource);
@@ -1028,6 +1133,23 @@ display_sync(struct wl_client *client,
 {
 	struct wl_resource *callback;
 	uint32_t serial;
+
+	if (id >= WL_SERVER_ID_START) {
+		/* This is not a sync request.  It's really a
+		   delete_id request.  A true sync request would have
+		   a client id instead. */
+		if (id == WL_DELETE_ID_HANDSHAKE) {
+			/* the id == WL_DELETE_ID_HANDSHAKE case is only to tell
+			 * us that the client will send other delete_id requests
+			 * later
+			 */
+			wl_map_disable_zombie_list(&client->objects);
+		}
+		else if (wl_map_mark_deleted(&client->objects, id) != 0)
+			wl_log("error: received delete_id for unknown id (%u)\n", id);
+
+		return;
+	}
 
 	callback = wl_resource_create(client, &wl_callback_interface, 1, id);
 	if (callback == NULL) {

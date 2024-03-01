@@ -50,14 +50,8 @@
 /** \cond */
 
 enum wl_proxy_flag {
-	WL_PROXY_FLAG_ID_DELETED = (1 << 0),
 	WL_PROXY_FLAG_DESTROYED = (1 << 1),
 	WL_PROXY_FLAG_WRAPPER = (1 << 2),
-};
-
-struct wl_zombie {
-	int event_count;
-	int *fd_count;
 };
 
 struct wl_proxy {
@@ -110,6 +104,7 @@ struct wl_display {
 	int reader_count;
 	uint32_t read_serial;
 	pthread_cond_t reader_cond;
+	bool use_sync_for_delete_id_requests;
 };
 
 /** \endcond */
@@ -412,66 +407,6 @@ wl_display_create_queue_with_name(struct wl_display *display, const char *name)
 	return queue;
 }
 
-static int
-message_count_fds(const char *signature)
-{
-	unsigned int count, i, fds = 0;
-	struct argument_details arg;
-
-	count = arg_count_for_signature(signature);
-	for (i = 0; i < count; i++) {
-		signature = get_next_argument(signature, &arg);
-		if (arg.type == 'h')
-			fds++;
-	}
-
-	return fds;
-}
-
-static struct wl_zombie *
-prepare_zombie(struct wl_proxy *proxy)
-{
-	const struct wl_interface *interface = proxy->object.interface;
-	const struct wl_message *message;
-	int i, count;
-	struct wl_zombie *zombie = NULL;
-
-	/* If we hit an event with an FD, ensure we have a zombie object and
-	 * fill the fd_count slot for that event with the number of FDs for
-	 * that event. Interfaces with no events containing FDs will not have
-	 * zombie objects created. */
-	for (i = 0; i < interface->event_count; i++) {
-		message = &interface->events[i];
-		count = message_count_fds(message->signature);
-
-		if (!count)
-			continue;
-
-		if (!zombie) {
-			zombie = zalloc(sizeof(*zombie) +
-				        (interface->event_count * sizeof(int)));
-			if (!zombie)
-				return NULL;
-
-			zombie->event_count = interface->event_count;
-			zombie->fd_count = (int *) &zombie[1];
-		}
-
-		zombie->fd_count[i] = count;
-	}
-
-	return zombie;
-}
-
-static enum wl_iterator_result
-free_zombies(void *element, void *data, uint32_t flags)
-{
-	if (flags & WL_MAP_ENTRY_ZOMBIE)
-		free(element);
-
-	return WL_ITERATOR_CONTINUE;
-}
-
 static struct wl_proxy *
 proxy_create(struct wl_proxy *factory, const struct wl_interface *interface,
 	     uint32_t version)
@@ -561,24 +496,75 @@ wl_proxy_create_for_id(struct wl_proxy *factory,
 	return proxy;
 }
 
+/* In the current protocol, the client has no equivalent to a
+ * wl_display delete_id event.  But it can benefit from one.  Here we
+ * hijack the wl_display sync request such that the client will send a
+ * sync with a server id instead of a client id, which will indicate
+ * it is really being used as a delete_id request.  The client will
+ * only do this if the server had previously sent a delete_id event
+ * for WL_DELETE_ID_HANDSHAKE, indicating it would accept such
+ * hijacked syncs.  */
+static void
+marshal_fake_sync_for_delete_id(struct wl_display *display, uint32_t id)
+{
+	if (id < WL_SERVER_ID_START) {
+		wl_log("error: marshal_fake_sync_for_delete_id on client id %u\n", id);
+		return;
+	}
+
+	/* We have to call wl_closure_marshal directly because we
+	 * already have the display mutex */
+
+	struct wl_proxy *proxy = &display->proxy;
+	const struct wl_message *message =
+		&proxy->object.interface->methods[WL_DISPLAY_SYNC];
+
+	union wl_argument arg;
+	struct wl_closure *closure;
+	/* Even though the sync request takes a new_id arg,
+	 * wl_closure_marshal wants an obj arg for the new_id arg,
+	 * meaning it wants an actual object instead of an id.  So we
+	 * fake up an object.  Fortunately, it only uses the id
+	 * field. */
+	struct wl_object fake_obj;
+	fake_obj.interface = NULL;
+	fake_obj.implementation = NULL;
+	fake_obj.id = id;
+	arg.o = &fake_obj;
+	closure = wl_closure_marshal(&proxy->object, WL_DISPLAY_SYNC, &arg, message);
+
+	if (closure == NULL) {
+		wl_log("Error marshalling request: %s\n", strerror(errno));
+		display_fatal_error(display, errno);
+		return;
+	}
+
+	if (debug_client) {
+		struct wl_event_queue *queue;
+
+		queue = wl_proxy_get_queue(proxy);
+		wl_closure_print(closure, &proxy->object, true, false, NULL,
+				 wl_event_queue_get_name(queue));
+	}
+
+	if (wl_closure_send(closure, display->connection)) {
+		wl_log("Error sending request: %s\n", strerror(errno));
+		display_fatal_error(display, errno);
+	}
+
+	wl_closure_destroy(closure);
+}
+
 static void
 proxy_destroy(struct wl_proxy *proxy)
 {
-	if (proxy->flags & WL_PROXY_FLAG_ID_DELETED) {
-		wl_map_remove(&proxy->display->objects, proxy->object.id);
-	} else if (proxy->object.id < WL_SERVER_ID_START) {
-		struct wl_zombie *zombie = prepare_zombie(proxy);
+	struct wl_display *display = proxy->display;
+	uint32_t id = proxy->object.id;
+	if (display->use_sync_for_delete_id_requests && id >= WL_SERVER_ID_START)
+		marshal_fake_sync_for_delete_id(display, id);
 
-		/* The map now contains the zombie entry, until the delete_id
-		 * event arrives. */
-		wl_map_insert_at(&proxy->display->objects,
-				 WL_MAP_ENTRY_ZOMBIE,
-				 proxy->object.id,
-				 zombie);
-	} else {
-		wl_map_insert_at(&proxy->display->objects, 0,
-				 proxy->object.id, NULL);
-	}
+	wl_map_zombify(&display->objects, id,
+		       proxy->object.interface);
 
 	proxy->flags |= WL_PROXY_FLAG_DESTROYED;
 
@@ -1107,20 +1093,23 @@ display_handle_error(void *data,
 static void
 display_handle_delete_id(void *data, struct wl_display *display, uint32_t id)
 {
-	struct wl_proxy *proxy;
-
 	pthread_mutex_lock(&display->mutex);
 
-	proxy = wl_map_lookup(&display->objects, id);
-
-	if (wl_object_is_zombie(&display->objects, id)) {
-		/* For zombie objects, the 'proxy' is actually the zombie
-		 * event-information structure, which we can free. */
-		free(proxy);
-		wl_map_remove(&display->objects, id);
-	} else if (proxy) {
-		proxy->flags |= WL_PROXY_FLAG_ID_DELETED;
-	} else {
+	if (id == WL_DELETE_ID_HANDSHAKE) {
+		/* The server has sent a special "impossible" delete_id event
+		 * to indicate that it can accept delete_id requests.  Note
+		 * that in the display, and reply with a similar delete_id
+		 * request */
+		/* The client doesn't have to return the handshake.
+		 * If it doesn't, the server will learn that the
+		 * client can send delete_id requests the first time
+		 * the client does so, if it does so.  But that might
+		 * be after the server has begun to recycle its IDs.
+		 * Unless the server has a large enough zombie
+		 * ring. */
+		display->use_sync_for_delete_id_requests = true;
+		marshal_fake_sync_for_delete_id(display, id);
+	} else if (wl_map_mark_deleted(&display->objects, id) != 0) {
 		wl_log("error: received delete_id for unknown id (%u)\n", id);
 	}
 
@@ -1234,6 +1223,7 @@ wl_display_connect_to_fd(int fd)
 	pthread_mutex_init(&display->mutex, NULL);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
+	display->use_sync_for_delete_id_requests = false;
 
 	if (wl_map_insert_at(&display->objects, 0, 0, NULL) == -1)
 		goto err_connection;
@@ -1359,7 +1349,6 @@ WL_EXPORT void
 wl_display_disconnect(struct wl_display *display)
 {
 	wl_connection_destroy(display->connection);
-	wl_map_for_each(&display->objects, free_zombies, NULL);
 	wl_map_release(&display->objects);
 	wl_event_queue_release(&display->default_queue);
 	free(display->default_queue.name);
@@ -1537,6 +1526,43 @@ increase_closure_args_refcount(struct wl_closure *closure)
 	closure->proxy->refcount++;
 }
 
+/* zombify_new_id is only called by wl_connection_demarshal_zombie
+ * when the event it is demarhsalling has new_id argments, meaning
+ * they're server IDs.  Those server IDs need to have zombies created
+ * for them in case the server subsequently sends an event to them,
+ * which might contain fds or more new_ids. */
+static int
+zombify_new_id(void *displayp, uint32_t id, const struct wl_interface *interface)
+{
+	struct wl_display *display = displayp;
+
+	if (id >= WL_SERVER_ID_START) {
+		/* Make the server ID a zombie in case it gets sent an
+		 * event.  This handles the "domino effect" case where
+		 * new_id args in events sent to zombies are
+		 * subsequently sent events, with new_id args, and so
+		 * on. */
+		if (wl_map_insert_at(&display->objects, 0, id, (void*)interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (wl_map_zombify(&display->objects, id, interface) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		assert(wl_map_lookup_zombie(&display->objects, id) == interface);
+
+		if (display->use_sync_for_delete_id_requests)
+			marshal_fake_sync_for_delete_id(display, id);
+
+		return 0;
+	} else {
+		/* Unexpected: the id is a client ID */
+		errno = EINVAL;
+		return -1;
+	}
+}
+
 static int
 queue_event(struct wl_display *display, int len)
 {
@@ -1548,7 +1574,7 @@ queue_event(struct wl_display *display, int len)
 	struct wl_event_queue *queue;
 	struct timespec tp;
 	unsigned int time;
-	int num_zombie_fds;
+	const struct wl_interface *interface;
 
 	wl_connection_copy(display->connection, p, sizeof p);
 	id = p[0];
@@ -1557,30 +1583,66 @@ queue_event(struct wl_display *display, int len)
 	if (len < size)
 		return 0;
 
-	/* If our proxy is gone or a zombie, just eat the event (and any FDs,
-	 * if applicable). */
 	proxy = wl_map_lookup(&display->objects, id);
-	if (!proxy || wl_object_is_zombie(&display->objects, id)) {
-		struct wl_zombie *zombie = wl_map_lookup(&display->objects, id);
-		num_zombie_fds = (zombie && opcode < zombie->event_count) ?
-			zombie->fd_count[opcode] : 0;
+	if (!proxy) {
+		interface = wl_map_lookup_zombie(&display->objects, id);
 
 		if (debug_client) {
 			clock_gettime(CLOCK_REALTIME, &tp);
 			time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
-			fprintf(stderr, "[%7u.%03u] discarded [%s]#%d.[event %d]"
-				"(%d fd, %d byte)\n",
+			fprintf(stderr, "[%7u.%03u] discarded [%s]#%u.[event %d]"
+				"(%s, %d byte)\n",
 				time / 1000, time % 1000,
-				zombie ? "zombie" : "unknown",
+				interface ? "zombie" : "unknown",
 				id, opcode,
-				num_zombie_fds, size);
+				interface ? interface->name : "unknown interface",
+				size);
 		}
-		if (num_zombie_fds > 0)
-			wl_connection_close_fds_in(display->connection,
-						   num_zombie_fds);
 
-		wl_connection_consume(display->connection, size);
+		if (interface) {
+			if (opcode >= interface->event_count) {
+				wl_log("interface '%s' has no event %u\n",
+				       interface->name, opcode);
+				return -1;
+			}
+			message = &interface->events[opcode];
+			if (message == NULL) {
+				wl_log("interface '%s' opcode %u has no event\n",
+				       interface->name, opcode);
+				return -1;
+			}
+			if (message->name == NULL) {
+				wl_log("interface '%s' opcode %u has noname event,\n",
+				       interface->name, opcode);
+				return -1;
+			}
+			wl_connection_demarshal_zombie(display->connection, size,
+						       &display->objects,
+						       message,
+						       &zombify_new_id, display);
+		} else {
+			/* what to do if there is no zombie interface? The
+			 * original zombie code just consumed the size and
+			 * continued on.  The assumption was if there was no
+			 * zombie, then the reason was that there's no fds to
+			 * consume, because zombies were only created for proxies
+			 * that have fd-bearing events.  But, there may have been
+			 * new_id args, so that could still have caused problems.
+			 * Under the new zombie regime, which always creates
+			 * zombies for proxies (because even an unpatched server
+			 * sends delete_id events), the absence of a zombie is
+			 * unexpected and means we need to kill the client. */
+			wl_log("Missing zombie for ID %u, event %u\n", id, opcode);
+			return -1;
+			/* Consider the case in the old regime where the proxy had
+			 * no fd-bearing events and no new_id-bearing events.  In
+			 * such cases, when there was no zombie, consuming the
+			 * size and moving on was OK, but there was no way to tell
+			 * it was OK.  Now we know the difference, and will always
+			 * log this error.
+			 */
+		}
 		return size;
 	}
 
