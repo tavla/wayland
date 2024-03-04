@@ -681,7 +681,7 @@ union wl_argument {
 	const char *s;       /**< `string` */
 	struct wl_object *o; /**< `object` */
 	uint32_t n;          /**< `new_id` */
-	struct wl_array *a;  /**< `array`  */
+	const struct wl_array *a;  /**< `array`  */
 	int32_t h;           /**< `fd`     */
 };
 

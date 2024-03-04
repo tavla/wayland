@@ -524,7 +524,7 @@ wl_argument_from_va_list(const char *signature, union wl_argument *args,
 			args[i].o = va_arg(ap, struct wl_object *);
 			break;
 		case 'a':
-			args[i].a = va_arg(ap, struct wl_array *);
+			args[i].a = va_arg(ap, const struct wl_array *);
 			break;
 		case 'h':
 			args[i].h = va_arg(ap, int32_t);

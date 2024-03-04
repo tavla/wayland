@@ -1120,7 +1120,7 @@ emit_type(struct arg *a)
 		printf("struct %s *", a->interface_name);
 		break;
 	case ARRAY:
-		printf("struct wl_array *");
+		printf("const struct wl_array *");
 		break;
 	}
 }
