@@ -1,4 +1,4 @@
-wayland_egl = library(
+wayland_egl = shared_library(
 	'wayland-egl',
 	sources: [
 		'wayland-egl.c',

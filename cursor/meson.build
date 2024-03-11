@@ -12,7 +12,7 @@ if wayland_version[0] != '1'
 	error('We probably need to bump the SONAME of libwayland-cursor')
 endif
 
-wayland_cursor = library(
+wayland_cursor = shared_library(
 	'wayland-cursor',
 	sources: [
 		'wayland-cursor.c',
