@@ -190,6 +190,9 @@ wl_event_loop_get_destroy_listener(struct wl_event_loop *loop,
 struct wl_display *
 wl_display_create(void);
 
+struct wl_display *
+wl_display_create2(void);
+
 void
 wl_display_destroy(struct wl_display *display);
 
@@ -318,6 +321,9 @@ wl_client_destroy(struct wl_client *client);
 
 void
 wl_client_flush(struct wl_client *client);
+
+int
+wl_client_dispatch(struct wl_client *client);
 
 void
 wl_client_get_credentials(struct wl_client *client,
