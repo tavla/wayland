@@ -64,8 +64,8 @@ static int timeouts_enabled = 1;
 static int is_atty = 0;
 
 #if __APPLE__
-extern const struct test __start_test_section __asm("section$start$__DATA$test_section");
-extern const struct test __stop_test_section __asm("section$end$__DATA$test_section");
+extern const struct test __start_test_section __asm("section$start$__RODATA$test_section");
+extern const struct test __stop_test_section __asm("section$end$__RODATA$test_section");
 #else
 extern const struct test __start_test_section, __stop_test_section;
 #endif

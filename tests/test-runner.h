@@ -38,7 +38,7 @@ struct test {
 } __attribute__ ((aligned (16)));
 
 #if __APPLE__
-#define TEST_SECTION "__DATA,test_section"
+#define TEST_SECTION "__RODATA,test_section"
 #else
 #define TEST_SECTION "test_section"
 #endif
