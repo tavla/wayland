@@ -39,6 +39,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+#ifdef __APPLE__
+#include <fcntl.h>
+#endif
+
 #include <pthread.h>
 #include <poll.h>
 
@@ -1499,6 +1503,10 @@ send_overflow_client(void *data)
 	/* Limit the send buffer size for the display socket to guarantee
 	 * that the test will cause an overflow. */
 	sock = wl_display_get_fd(c->wl_display);
+#if __APPLE__
+	/* Darwin sockets may by non-blocked after accept() */
+	assert(fcntl(sock, F_SETFL, ~O_NONBLOCK) != -1);
+#endif
 	assert(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &optval, sizeof(optval)) == 0);
 
 	/* Request to break out of 'display_run' in the main process */
