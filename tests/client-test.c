@@ -97,7 +97,13 @@ TEST(client_destroy_listener)
 	bool user_data_destroyed = false;
 	int s[2];
 
+#ifdef SOCK_CLOEXEC
 	assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, s) == 0);
+#else
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0);
+	assert(set_cloexec_or_close(s[0]) != -1);
+	assert(set_cloexec_or_close(s[1]) != -1);
+#endif
 	display = wl_display_create();
 	assert(display);
 	client = wl_client_create(display, s[0]);
@@ -184,7 +190,13 @@ TEST(client_destroy_removes_link)
 	struct client_destroy_listener destroy_listener;
 	int s[2];
 
+#ifdef SOCK_CLOEXEC
 	assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, s) == 0);
+#else
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0);
+	assert(set_cloexec_or_close(s[0]) != -1);
+	assert(set_cloexec_or_close(s[1]) != -1);
+#endif
 	display = wl_display_create();
 	assert(display);
 	client = wl_client_create(display, s[0]);

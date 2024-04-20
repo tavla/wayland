@@ -23,6 +23,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+ /* This test should be skipped on Darwin (as of 2024) */
+#ifndef __APPLE__
 #include "../config.h"
 
 #define _GNU_SOURCE
@@ -387,5 +389,5 @@ TEST(os_wrappers_epoll_create_cloexec_fallback)
 	init_fallbacks(1);
 	do_os_wrappers_epoll_create_cloexec(2);
 }
-
+#endif /* __APPLE__ */
 /* FIXME: add tests for wl_os_accept_cloexec() */
