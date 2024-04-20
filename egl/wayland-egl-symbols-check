@@ -20,7 +20,7 @@ if [ "$(uname)" == "Darwin" ]; then
 else
   NM_DYNSYM_TABLE="-D"
   SYMBOL_PREFIX=""
-endif
+fi
 
 AVAIL_FUNCS="$($NM ${NM_DYNSYM_TABLE} --format=bsd --defined-only $LIB | awk '{print $3}')"
 
