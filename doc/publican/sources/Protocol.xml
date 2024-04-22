@@ -368,8 +368,8 @@
       trigger further requests (such as button presses, key events,
       pointer motions) carry serial numbers, and requests such as
       wl_surface.set_popup require that the serial number of the
-      triggering event is specified. The server maintains a
-      monotonically increasing counter for these serial numbers.
+      triggering event is specified. Serial numbers are opaque,
+      clients should not assign any meaning to them.
     </para>
     <para>
       Input events also carry timestamps with millisecond granularity.
