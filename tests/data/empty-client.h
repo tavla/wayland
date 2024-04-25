@@ -31,6 +31,8 @@ struct empty;
 extern const struct wl_interface empty_interface;
 #endif
 
+#define EMPTY_MAX_VERSION 1
+
 #define EMPTY_EMPTY 0
 
 
