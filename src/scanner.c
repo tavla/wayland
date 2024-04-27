@@ -209,6 +209,12 @@ enum arg_type {
 	FD
 };
 
+enum element_type {
+        ELEMENT_TYPE_NONE,
+        ELEMENT_TYPE_INT,
+        ELEMENT_TYPE_UNSIGNED,
+};
+
 struct arg {
 	char *name;
 	enum arg_type type;
@@ -217,6 +223,8 @@ struct arg {
 	struct wl_list link;
 	char *summary;
 	char *enumeration_name;
+	enum element_type element_type;
+	int element_bits;
 };
 
 struct enumeration {
@@ -736,7 +744,9 @@ start_element(void *data, const char *element_name, const char **atts)
 	const char *allow_null = NULL;
 	const char *enumeration_name = NULL;
 	const char *bitfield = NULL;
+	const char *element_type = NULL;
 	int i, version = 0;
+	int element_bits = 0;
 
 	ctx->loc.line_number = XML_GetCurrentLineNumber(ctx->parser);
 	for (i = 0; atts[i]; i += 2) {
@@ -765,6 +775,23 @@ start_element(void *data, const char *element_name, const char **atts)
 			enumeration_name = atts[i + 1];
 		if (strcmp(atts[i], "bitfield") == 0)
 			bitfield = atts[i + 1];
+		if (strcmp(atts[i], "element-type") == 0)
+			element_type = atts[i + 1];
+		if (strcmp(atts[i], "element-bits") == 0) {
+			element_bits = strtouint(atts[i + 1]);
+			switch (element_bits) {
+			case 8:
+			case 16:
+			case 32:
+			/* Note: the wire protocol only guarantees 4 byte alignment
+			 * of array data. Therefore we cannot allow 64 bit elements
+			 * as they require 8 byte alignment on common targets. */
+				break;
+			default:
+				fail(&ctx->loc,
+				     "invalid element-bits value (%d)", atts[i + 1]);
+			}
+		}
 	}
 
 	ctx->character_data_length = 0;
@@ -868,6 +895,21 @@ start_element(void *data, const char *element_name, const char **atts)
 			arg->enumeration_name = NULL;
 		else
 			arg->enumeration_name = xstrdup(enumeration_name);
+
+		if (element_type == NULL) {
+			arg->element_type = ELEMENT_TYPE_NONE;
+		} else {
+			if (strcmp(element_type, "int") == 0) {
+				arg->element_type = ELEMENT_TYPE_INT;
+			} else if (strcmp(element_type, "uint") == 0) {
+			        arg->element_type = ELEMENT_TYPE_UNSIGNED;
+			} else {
+				fail(&ctx->loc,
+				     "invalid element type '%s', must be int or uint",
+				     element_type);
+			}
+		}
+		arg->element_bits = element_bits;
 
 		if (summary)
 			arg->summary = xstrdup(summary);
@@ -978,6 +1020,68 @@ find_enumeration(struct protocol *protocol,
 }
 
 static void
+verify_argument_attributes(struct parse_context *ctx,
+			   struct interface *interface,
+			   struct arg *a)
+{
+	struct enumeration *e;
+	enum arg_type t;
+
+	if (a->type == ARRAY) {
+		if ((a->element_type != ELEMENT_TYPE_NONE) != (a->element_bits != 0)) {
+			fail(&ctx->loc,
+			     "if one of element-type or element-bits is specified "
+			     "the other must be as well");
+		}
+	} else {
+		if (a->element_type != ELEMENT_TYPE_NONE) {
+			fail(&ctx->loc,
+			     "only args of type array may specify an element-type");
+		}
+		if (a->element_bits != 0) {
+			fail(&ctx->loc,
+			     "only args of type array may specify element-bits");
+		}
+	}
+
+	switch (a->element_type) {
+	case ELEMENT_TYPE_NONE:
+		t = a->type;
+		break;
+	case ELEMENT_TYPE_INT:
+	        t = INT;
+	        break;
+	case ELEMENT_TYPE_UNSIGNED:
+		t = UNSIGNED;
+		break;
+	default:
+		abort();
+	}
+
+	if (!a->enumeration_name)
+		return;
+
+	e = find_enumeration(ctx->protocol, interface,
+			     a->enumeration_name);
+
+	switch (t) {
+	case INT:
+		if (e && e->bitfield)
+			fail(&ctx->loc,
+			     "bitfield-style enum must only be referenced by uint");
+		break;
+	case UNSIGNED:
+		break;
+	case ARRAY:
+		fail(&ctx->loc,
+		     "array arg must specify element-type if enum is specified");
+	default:
+		fail(&ctx->loc,
+		     "enumeration-style argument has wrong type");
+	}
+}
+
+static void
 verify_arguments(struct parse_context *ctx,
 		 struct interface *interface,
 		 struct wl_list *messages,
@@ -987,27 +1091,7 @@ verify_arguments(struct parse_context *ctx,
 	wl_list_for_each(m, messages, link) {
 		struct arg *a;
 		wl_list_for_each(a, &m->arg_list, link) {
-			struct enumeration *e;
-
-			if (!a->enumeration_name)
-				continue;
-
-
-			e = find_enumeration(ctx->protocol, interface,
-					     a->enumeration_name);
-
-			switch (a->type) {
-			case INT:
-				if (e && e->bitfield)
-					fail(&ctx->loc,
-					     "bitfield-style enum must only be referenced by uint");
-				break;
-			case UNSIGNED:
-				break;
-			default:
-				fail(&ctx->loc,
-				     "enumeration-style argument has wrong type");
-			}
+			verify_argument_attributes(ctx, interface, a);
 		}
 	}
 
