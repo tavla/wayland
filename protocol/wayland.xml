@@ -2455,6 +2455,9 @@
 
 	From version 7 onwards, the fd must be mapped with MAP_PRIVATE by
 	the recipient, as MAP_SHARED may fail.
+
+	From version 10 onwards, the compositor must not send this event while
+	the wl_keyboard has an active surface.
       </description>
       <arg name="format" type="uint" enum="keymap_format" summary="keymap format"/>
       <arg name="fd" type="fd" summary="keymap file descriptor"/>
