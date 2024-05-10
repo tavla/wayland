@@ -1874,7 +1874,7 @@
     </event>
    </interface>
 
-  <interface name="wl_seat" version="9">
+  <interface name="wl_seat" version="10">
     <description summary="group of input devices">
       A seat is a group of keyboards, pointer and touch devices. This
       object is published as a global during start up, or when such a
@@ -2007,7 +2007,7 @@
 
   </interface>
 
-  <interface name="wl_pointer" version="9">
+  <interface name="wl_pointer" version="10">
     <description summary="pointer input device">
       The wl_pointer interface represents one or more input devices,
       such as mice, which control the pointer location and pointer_focus
@@ -2420,7 +2420,7 @@
     </event>
   </interface>
 
-  <interface name="wl_keyboard" version="9">
+  <interface name="wl_keyboard" version="10">
     <description summary="keyboard input device">
       The wl_keyboard interface represents one or more keyboards
       associated with a seat.
@@ -2582,9 +2582,26 @@
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
     </event>
+
+    <!-- Version 10 additions -->
+
+    <event name="frame" since="10">
+      <description summary="end of a keyboard event sequence">
+	Indicates the end of a set of events that logically belong together.
+
+	Clients should accumulate all wl_keyboard events until they receive a
+	frame event and then apply the events atomically.
+
+	For example, if a leave event is followed by an enter event in the same
+	frame, then the client never lost keyboard focus even though it received
+	a leave event. A compositor might use this to atomically move the
+	keyboard focus between client surfaces or when sending a new
+	wl_keyboard.keymap.
+      </description>
+    </event>
   </interface>
 
-  <interface name="wl_touch" version="9">
+  <interface name="wl_touch" version="10">
     <description summary="touchscreen input device">
       The wl_touch interface represents a touchscreen
       associated with a seat.
