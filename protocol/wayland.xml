@@ -487,6 +487,9 @@
 
       Note, because wl_buffer objects are created from multiple independent
       factory interfaces, the wl_buffer interface is frozen at version 1.
+
+      If the client destroys the underlying storage of a wl_buffer while the
+      compositor is using the buffer, the behavior is unspecified.
     </description>
 
     <request name="destroy" type="destructor">
