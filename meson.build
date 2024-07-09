@@ -6,7 +6,7 @@ project(
 	default_options: [
 		'warning_level=2',
 		'buildtype=debugoptimized',
-		'c_std=c99',
+		'c_std=' + (meson.version().version_compare('>=1.3.0') ? 'c23,c11,c99' : 'c99'),
 	]
 )
 wayland_version = meson.project_version().split('.')
