@@ -1593,6 +1593,11 @@
 	Clients should therefore only submit a single frame request for a
 	surface at a time.
 
+	Frame requests of a surface should be signaled on a schedule, that is,
+	when a frame request is signaled, frame requests that are committed
+	afterwards should not be signaled until some time in the future. The
+	spacing between these points in time need not be regular.
+
 	The object returned by this request will be destroyed by the
 	compositor after the callback is fired and as such the client must not
 	attempt to use it after that point.
