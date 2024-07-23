@@ -1880,7 +1880,7 @@
     </event>
    </interface>
 
-  <interface name="wl_seat" version="9">
+  <interface name="wl_seat" version="10">
     <description summary="group of input devices">
       A seat is a group of keyboards, pointer and touch devices. This
       object is published as a global during start up, or when such a
@@ -2013,7 +2013,7 @@
 
   </interface>
 
-  <interface name="wl_pointer" version="9">
+  <interface name="wl_pointer" version="10">
     <description summary="pointer input device">
       The wl_pointer interface represents one or more input devices,
       such as mice, which control the pointer location and pointer_focus
@@ -2426,7 +2426,7 @@
     </event>
   </interface>
 
-  <interface name="wl_keyboard" version="9">
+  <interface name="wl_keyboard" version="10">
     <description summary="keyboard input device">
       The wl_keyboard interface represents one or more keyboards
       associated with a seat.
@@ -2461,6 +2461,10 @@
 
 	From version 7 onwards, the fd must be mapped with MAP_PRIVATE by
 	the recipient, as MAP_SHARED may fail.
+
+	From version 10 onwards, if the wl_keyboard has an active surface
+	immediately before this event, the compositor must send modifiers and
+	keys events immediately after this event.
       </description>
       <arg name="format" type="uint" enum="keymap_format" summary="keymap format"/>
       <arg name="fd" type="fd" summary="keymap file descriptor"/>
@@ -2588,9 +2592,23 @@
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
     </event>
+
+    <!-- Version 10 additions -->
+
+    <event name="keys" since="10">
+      <description summary="logically down keys">
+	Notifies the client that the set of logically down keys has changed.
+
+	In the wl_keyboard logical state, this event replaces the keys currently
+	logically down. The compositor must not send this event if the
+	wl_keyboard did not have an active surface immediately before this
+	event.
+      </description>
+      <arg name="keys" type="array" summary="the keys currently logically down"/>
+    </event>
   </interface>
 
-  <interface name="wl_touch" version="9">
+  <interface name="wl_touch" version="10">
     <description summary="touchscreen input device">
       The wl_touch interface represents a touchscreen
       associated with a seat.
