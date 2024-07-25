@@ -917,7 +917,10 @@ wl_connection_demarshal(struct wl_connection *connection,
 	count = closure->count;
 
 	array_extra = closure->extra;
-	p = (uint32_t *)(closure->extra + num_arrays);
+	STATIC_ASSERT(sizeof(*closure) % sizeof(*p) == 0, "pointer would be misaligned");
+	STATIC_ASSERT(sizeof(struct wl_array) % sizeof(*p) == 0, "pointer would be misaligned");
+	p = (uint32_t *)((char *)closure + sizeof(*closure) +
+			 num_arrays * sizeof(struct wl_array));
 	end = p + size / sizeof *p;
 
 	wl_connection_copy(connection, p, size);

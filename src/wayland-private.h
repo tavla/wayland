@@ -35,6 +35,17 @@
 
 #define WL_HIDE_DEPRECATED 1
 
+#if __STDC_VERSION__ >= 202311L
+/* _Static_assert is allowed but deprecated. */
+# define STATIC_ASSERT(a, b) static_assert(a, b)
+#elif __STDC_VERSION__ >= 201112L
+/* static_assert is provided by <assert.h>, but libwayland doesn't use <assert.h> */
+# define STATIC_ASSERT(a, b) _Static_assert(a, b)
+#else
+/* Use legacy method. */
+# define STATIC_ASSERT(a, b) ((void)sizeof(char[(a) ? 1 : -1]))
+#endif
+
 #include "wayland-util.h"
 
 /* Invalid memory address */
