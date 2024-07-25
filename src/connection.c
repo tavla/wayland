@@ -1069,6 +1069,12 @@ wl_connection_demarshal(struct wl_connection *connection,
 		}
 	}
 
+	if (p != end) {
+		wl_log("trailing junk\n");
+		errno = EINVAL;
+		goto err;
+	}
+
 	wl_connection_consume(connection, size);
 
 	return closure;
