@@ -400,6 +400,15 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 		if (len < size)
 			break;
 
+		if ((size & 3) != 0) {
+			/* Post a better error than "invalid arguments" */
+			wl_resource_post_error(client->display_resource,
+			                       WL_DISPLAY_ERROR_INVALID_METHOD,
+			                       "message length %u is not multiple of 4",
+			                       size);
+			break;
+		}
+
 		resource = wl_map_lookup(&client->objects, p[0]);
 		resource_flags = wl_map_lookup_flags(&client->objects, p[0]);
 		if (resource == NULL) {
