@@ -1335,6 +1335,15 @@ wl_global_create(struct wl_display *display,
 		return NULL;
 	}
 
+#if INT_MAX > UINT32_MAX
+	if (version > (int)UINT32_MAX) {
+		wl_log("wl_global_create: failing to create interface "
+		       "'%s' with version %d because it is above %" PRIu32 "\n"
+			interface->name, version, UINT32_MAX);
+		return NULL;
+	}
+#endif
+
 	if (version > interface->version) {
 		wl_log("wl_global_create: implemented version for '%s' "
 		       "higher than interface version (%d > %d)\n",
