@@ -154,9 +154,23 @@ struct location {
 	int line_number;
 };
 
+enum element {
+	INVALID,
+	PROTOCOL,
+	COPYRIGHT,
+	INTERFACE,
+	REQUEST,
+	EVENT,
+	ENUM,
+	ENTRY,
+	ARG,
+	DESCRIPTION,
+};
+
 struct description {
 	char *summary;
 	char *text;
+	enum element parent;
 };
 
 struct protocol {
@@ -196,6 +210,7 @@ struct message {
 	int destructor;
 	int since, deprecated_since;
 	struct description *description;
+	enum element direction;
 };
 
 enum arg_type {
@@ -217,6 +232,7 @@ struct arg {
 	struct wl_list link;
 	char *summary;
 	char *enumeration_name;
+	enum element parent;
 };
 
 struct enumeration {
@@ -250,7 +266,66 @@ struct parse_context {
 	struct description *description;
 	char character_data[8192];
 	unsigned int character_data_length;
+	enum element parent;
+	bool copyright_forbidden;
 };
+
+static void __attribute__((format(printf, 2, 3), noreturn))
+fail(struct location *loc, const char *msg, ...)
+{
+	va_list ap;
+
+	va_start(ap, msg);
+	fprintf(stderr, "%s:%d: error: ",
+		loc->filename, loc->line_number);
+	vfprintf(stderr, msg, ap);
+	fprintf(stderr, "\n");
+	va_end(ap);
+	exit(EXIT_FAILURE);
+}
+
+static enum element
+parse_element_name(struct parse_context *ctx,
+                   const char *element_name)
+{
+	switch (*element_name) {
+	case 'p':
+		if (strcmp(element_name + 1, "rotocol") == 0)
+			return PROTOCOL;
+		break;
+	case 'c':
+		if (strcmp(element_name + 1, "opyright") == 0)
+			return COPYRIGHT;
+		break;
+	case 'i':
+		if (strcmp(element_name + 1, "nterface") == 0)
+			return INTERFACE;
+		break;
+	case 'd':
+		if (strcmp(element_name + 1, "escription") == 0)
+			return DESCRIPTION;
+		break;
+	case 'r':
+		if (strcmp(element_name + 1, "equest") == 0)
+			return REQUEST;
+		break;
+	case 'e':
+		if (strcmp(element_name + 1, "vent") == 0)
+			return EVENT;
+		if (strcmp(element_name + 1, "num") == 0)
+			return ENUM;
+		if (strcmp(element_name + 1, "ntry") == 0)
+			return ENTRY;
+		break;
+	case 'a':
+		if (strcmp(element_name + 1, "rg") == 0)
+			return ARG;
+		break;
+	default:
+		break;
+	}
+	fail(&ctx->loc, "unknown element %s", element_name);
+}
 
 enum identifier_role {
 	STANDALONE_IDENT,
@@ -380,20 +455,6 @@ desc_dump(char *desc, const char *fmt, ...)
 	putchar('\n');
 }
 
-static void __attribute__((format(printf, 2, 3), noreturn))
-fail(struct location *loc, const char *msg, ...)
-{
-	va_list ap;
-
-	va_start(ap, msg);
-	fprintf(stderr, "%s:%d: error: ",
-		loc->filename, loc->line_number);
-	vfprintf(stderr, msg, ap);
-	fprintf(stderr, "\n");
-	va_end(ap);
-	exit(EXIT_FAILURE);
-}
-
 static void __attribute__((format(printf, 2, 3)))
 warn(struct location *loc, const char *msg, ...)
 {
@@ -421,7 +482,7 @@ is_nullable_type(struct arg *arg)
 }
 
 static struct message *
-create_message(struct location loc, const char *name)
+create_message(struct location loc, const char *name, enum element direction)
 {
 	struct message *message;
 
@@ -429,6 +490,7 @@ create_message(struct location loc, const char *name)
 	message->loc = loc;
 	message->name = xstrdup(name);
 	message->uppercase_name = uppercase_dup(name);
+	message->direction = direction;
 	wl_list_init(&message->arg_list);
 
 	return message;
@@ -743,8 +805,13 @@ start_element(void *data, const char *element_name, const char **atts)
 	const char *enumeration_name = NULL;
 	const char *bitfield = NULL;
 	int i, version = 0;
+	enum element element = parse_element_name(ctx, element_name);
 
 	ctx->loc.line_number = XML_GetCurrentLineNumber(ctx->parser);
+	if (ctx->description)
+		fail(&ctx->loc, "element not allowed in <description>");
+	if (ctx->parent == COPYRIGHT)
+		fail(&ctx->loc, "element not allowed in <copyright>");
 	for (i = 0; atts[i]; i += 2) {
 		if (strcmp(atts[i], "name") == 0)
 			name = atts[i + 1];
@@ -780,7 +847,9 @@ start_element(void *data, const char *element_name, const char **atts)
 	}
 
 	ctx->character_data_length = 0;
-	if (strcmp(element_name, "protocol") == 0) {
+	if (element == PROTOCOL) {
+		if (ctx->parent != INVALID)
+			fail(&ctx->loc, "Protocol element not root element");
 		if (name == NULL)
 			fail(&ctx->loc, "no protocol name given");
 		if (atts[2])
@@ -788,12 +857,16 @@ start_element(void *data, const char *element_name, const char **atts)
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		ctx->protocol->name = xstrdup(name);
 		ctx->protocol->uppercase_name = uppercase_dup(name);
-	} else if (strcmp(element_name, "copyright") == 0) {
+	} else if (element == COPYRIGHT) {
 		if (atts[0])
-			fail(&ctx->loc, "copyright element takes no attributes");
-	} else if (strcmp(element_name, "interface") == 0) {
+			fail(&ctx->loc, "<copyright> takes no attributes");
+		if (ctx->parent != PROTOCOL)
+			fail(&ctx->loc, "<copyright> must be under <protocol>");
+	} else if (element == INTERFACE) {
 		if (name == NULL)
 			fail(&ctx->loc, "no interface name given");
+		if (ctx->parent != PROTOCOL)
+			fail(&ctx->loc, "<interface> must be under <protocol>");
 
 		if (version == 0)
 			fail(&ctx->loc, "no interface version given");
@@ -806,15 +879,17 @@ start_element(void *data, const char *element_name, const char **atts)
 		ctx->interface = interface;
 		wl_list_insert(ctx->protocol->interface_list.prev,
 			       &interface->link);
-	} else if (strcmp(element_name, "request") == 0 ||
-		   strcmp(element_name, "event") == 0) {
+		ctx->copyright_forbidden = true;
+	} else if (element == REQUEST || element == EVENT) {
 		if (name == NULL)
-			fail(&ctx->loc, "no request name given");
+			fail(&ctx->loc, "no %s name given", element_name);
+		if (ctx->parent != INTERFACE)
+			fail(&ctx->loc, "<%s> not child of <interface>", element_name);
 
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
-		message = create_message(ctx->loc, name);
+		message = create_message(ctx->loc, name, element);
 
-		if (strcmp(element_name, "request") == 0)
+		if (element == REQUEST)
 			wl_list_insert(ctx->interface->request_list.prev,
 				       &message->link);
 		else
@@ -844,9 +919,11 @@ start_element(void *data, const char *element_name, const char **atts)
 			fail(&ctx->loc, "destroy request should be destructor type");
 
 		ctx->message = message;
-	} else if (strcmp(element_name, "arg") == 0) {
+	} else if (element == ARG) {
 		if (name == NULL)
 			fail(&ctx->loc, "no argument name given");
+		if (ctx->parent != REQUEST && ctx->parent != EVENT)
+			fail(&ctx->loc, "<arg> must be child of <request> or <event>");
 
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		arg = create_arg(name);
@@ -894,9 +971,11 @@ start_element(void *data, const char *element_name, const char **atts)
 
 		wl_list_insert(ctx->message->arg_list.prev, &arg->link);
 		ctx->message->arg_count++;
-	} else if (strcmp(element_name, "enum") == 0) {
+	} else if (element == ENUM) {
 		if (name == NULL)
 			fail(&ctx->loc, "no enum name given");
+		if (ctx->parent != INTERFACE)
+			fail(&ctx->loc, "<enum> not child of <interface>");
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		enumeration = create_enumeration(name);
@@ -914,9 +993,11 @@ start_element(void *data, const char *element_name, const char **atts)
 			       &enumeration->link);
 
 		ctx->enumeration = enumeration;
-	} else if (strcmp(element_name, "entry") == 0) {
+	} else if (element == ENTRY) {
 		if (name == NULL)
 			fail(&ctx->loc, "no entry name given");
+		if (ctx->parent != ENUM)
+			fail(&ctx->loc, "<%s> not child of <enum>", element_name);
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		entry = create_entry(name, value);
@@ -941,15 +1022,16 @@ start_element(void *data, const char *element_name, const char **atts)
 		wl_list_insert(ctx->enumeration->entry_list.prev,
 			       &entry->link);
 		ctx->entry = entry;
-	} else if (strcmp(element_name, "description") == 0) {
+	} else if (element == DESCRIPTION) {
 		if (summary == NULL)
 			fail(&ctx->loc, "description without summary");
 		/* must be valid since summary attribute present */
 		if (atts[2])
-			fail(&ctx->loc, "description with non-summary attribute");
+			fail(&ctx->loc, "too many attributes for <description>");
 
 		description = xzalloc(sizeof *description);
 		description->summary = xstrdup(summary);
+		description->parent = ctx->parent;
 
 		if (ctx->message)
 			ctx->message->description = description;
@@ -963,8 +1045,9 @@ start_element(void *data, const char *element_name, const char **atts)
 			ctx->protocol->description = description;
 		ctx->description = description;
 	} else {
-		fail(&ctx->loc, "unknown element %s", element_name);
+		abort(); /* not reached */
 	}
+	ctx->parent = element;
 }
 
 static struct enumeration *
@@ -1054,33 +1137,54 @@ end_element(void *data, const XML_Char *name)
 {
 	struct parse_context *ctx = data;
 
-	if (strcmp(name, "copyright") == 0) {
+	switch (parse_element_name(ctx, name)) {
+	case COPYRIGHT:
 		ctx->protocol->copyright =
-			strndup(ctx->character_data,
-				ctx->character_data_length);
-	} else if (strcmp(name, "description") == 0) {
+			fail_on_null(strndup(ctx->character_data,
+				             ctx->character_data_length));
+		ctx->parent = PROTOCOL;
+		break;
+	case DESCRIPTION:
 		ctx->description->text =
-			strndup(ctx->character_data,
-				ctx->character_data_length);
+			fail_on_null(strndup(ctx->character_data,
+				     ctx->character_data_length));
+		ctx->parent = ctx->description->parent;
 		ctx->description = NULL;
-	} else if (strcmp(name, "request") == 0 ||
-		   strcmp(name, "event") == 0) {
+		break;
+	case REQUEST:
+	case EVENT:
 		ctx->message = NULL;
-	} else if (strcmp(name, "enum") == 0) {
+		ctx->parent = INTERFACE;
+		break;
+	case ENUM:
 		if (wl_list_empty(&ctx->enumeration->entry_list)) {
 			fail(&ctx->loc, "enumeration %s was empty",
 			     ctx->enumeration->name);
 		}
+		ctx->parent = INTERFACE;
 		ctx->enumeration = NULL;
-	} else if (strcmp(name, "entry") == 0) {
+		break;
+	case ENTRY:
 		ctx->entry = NULL;
-	} else if (strcmp(name, "protocol") == 0) {
+		ctx->parent = ENUM;
+		break;
+	case PROTOCOL: {
 		struct interface *i;
 
 		wl_list_for_each(i, &ctx->protocol->interface_list, link) {
 			verify_arguments(ctx, i, &i->request_list, &i->enumeration_list);
 			verify_arguments(ctx, i, &i->event_list, &i->enumeration_list);
 		}
+		break;
+	}
+	case ARG:
+		ctx->parent = ctx->message->direction;
+		break;
+	case INTERFACE:
+		ctx->parent = PROTOCOL;
+		break;
+	default:
+		abort();
 	}
 }
 
