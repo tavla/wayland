@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
 
 #define WL_HIDE_DEPRECATED 1
 
@@ -144,13 +145,13 @@ wl_connection_copy(struct wl_connection *connection, void *data, size_t size);
 void
 wl_connection_consume(struct wl_connection *connection, size_t size);
 
-int
+ssize_t
 wl_connection_flush(struct wl_connection *connection);
 
 uint32_t
 wl_connection_pending_input(struct wl_connection *connection);
 
-int
+ssize_t
 wl_connection_read(struct wl_connection *connection);
 
 int
