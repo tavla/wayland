@@ -413,7 +413,7 @@ decode_cmsg(struct wl_ring_buffer *buffer, struct msghdr *msg)
 {
 	struct cmsghdr *cmsg;
 	size_t size, i;
-	int overflow = 0;
+	bool overflow = false;
 
 	for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL;
 	     cmsg = CMSG_NXTHDR(msg, cmsg)) {
@@ -424,7 +424,7 @@ decode_cmsg(struct wl_ring_buffer *buffer, struct msghdr *msg)
 		size = cmsg->cmsg_len - CMSG_LEN(0);
 
 		if (ring_buffer_ensure_space(buffer, size) < 0 || overflow) {
-			overflow = 1;
+			overflow = true;
 			size /= sizeof(int32_t);
 			for (i = 0; i < size; i++)
 				close(((int*)CMSG_DATA(cmsg))[i]);
