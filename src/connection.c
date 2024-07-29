@@ -1052,7 +1052,10 @@ wl_connection_demarshal(struct wl_connection *connection,
 				goto err;
 			}
 
+			/* This ring buffer will always have a multiple of sizeof(int)
+			 * bytes in it. */
 			ring_buffer_copy(&connection->fds_in, &fd, sizeof fd);
+			/* This can wrap but that is okay. */
 			connection->fds_in.tail += sizeof fd;
 			closure->args[i].h = fd;
 			break;
