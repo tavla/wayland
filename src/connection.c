@@ -113,6 +113,7 @@ ring_buffer_put(struct wl_ring_buffer *b, const void *data, size_t count)
 	return 0;
 }
 
+/* Precondition: the buffer is not full */
 static void
 ring_buffer_put_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 {
@@ -125,10 +126,13 @@ ring_buffer_put_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 		iov[0].iov_len = tail - head;
 		*count = 1;
 	} else if (tail == 0) {
+		/* We assume that head == 0 means an empty buffer, not a full one. */
 		iov[0].iov_base = b->data + head;
 		iov[0].iov_len = ring_buffer_capacity(b) - head;
 		*count = 1;
 	} else {
+		/* head == 0 is checked earlier, so there is at least one byte to
+		 * read after head. */
 		iov[0].iov_base = b->data + head;
 		iov[0].iov_len = ring_buffer_capacity(b) - head;
 		iov[1].iov_base = b->data;
@@ -137,6 +141,7 @@ ring_buffer_put_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 	}
 }
 
+/* Precondition: the buffer is not empty */
 static void
 ring_buffer_get_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 {
@@ -161,6 +166,7 @@ ring_buffer_get_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 	}
 }
 
+/* Precondition: the data will not overflow the buffer */
 static void
 ring_buffer_copy(struct wl_ring_buffer *b, void *data, size_t count)
 {
@@ -456,6 +462,9 @@ wl_connection_flush(struct wl_connection *connection)
 
 	tail = connection->out.tail;
 	while (ring_buffer_size(&connection->out) > 0) {
+		/* Ring buffer is not empty, so this is safe. */
+		ring_buffer_get_iov(&connection->out, iov, &count);
+
 		build_cmsg(&connection->fds_out, cmsg, &clen);
 
 		if (clen >= CLEN) {
@@ -530,6 +539,7 @@ wl_connection_read(struct wl_connection *connection)
 		if (ring_buffer_ensure_space(&connection->in, 1) < 0)
 			return -1;
 
+		/* Ring buffer is not full, so this is safe. */
 		ring_buffer_put_iov(&connection->in, iov, &count);
 
 		msg.msg_name = NULL;
