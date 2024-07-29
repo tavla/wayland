@@ -795,6 +795,7 @@ wl_message_get_since(const struct wl_message *message)
 {
 	int since;
 
+	/* This is trusted input */
 	since = atoi(message->signature);
 
 	if (since == 0)
