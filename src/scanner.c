@@ -267,7 +267,7 @@ struct parse_context {
 	char character_data[8192];
 	unsigned int character_data_length;
 	enum element parent;
-	bool copyright_forbidden;
+	bool copyright_forbidden, description_forbidden;
 };
 
 static void __attribute__((format(printf, 2, 3), noreturn))
@@ -813,9 +813,11 @@ start_element(void *data, const char *element_name, const char **atts)
 	if (ctx->parent == COPYRIGHT)
 		fail(&ctx->loc, "element not allowed in <copyright>");
 	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
+		if (strcmp(atts[i], "name") == 0) {
 			name = atts[i + 1];
-		else if (strcmp(atts[i], "version") == 0) {
+			/* Anything with a name can have a description */
+			ctx->description_forbidden = false;
+		} else if (strcmp(atts[i], "version") == 0) {
 			version = strtouint(atts[i + 1]);
 			if (version == -1)
 				fail(&ctx->loc, "wrong version (%s)", atts[i + 1]);
@@ -838,7 +840,7 @@ start_element(void *data, const char *element_name, const char **atts)
 		else if (strcmp(atts[i], "enum") == 0)
 			enumeration_name = atts[i + 1];
 		else if (strcmp(atts[i], "bitfield") == 0) {
-			if (strcmp(element_name, "enum"))
+			if (element != ENUM)
 				fail(&ctx->loc, "bitfield attribute only valid on enum element");
 			bitfield = atts[i + 1];
 		} else {
@@ -852,16 +854,21 @@ start_element(void *data, const char *element_name, const char **atts)
 			fail(&ctx->loc, "Protocol element not root element");
 		if (name == NULL)
 			fail(&ctx->loc, "no protocol name given");
+		/* must be valid since name given */
 		if (atts[2])
 			fail(&ctx->loc, "Unexpected attribute for protocol element");
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		ctx->protocol->name = xstrdup(name);
 		ctx->protocol->uppercase_name = uppercase_dup(name);
+	} else if (ctx->parent == INVALID) {
+		fail(&ctx->loc, "Root element not <protocol>");
 	} else if (element == COPYRIGHT) {
 		if (atts[0])
 			fail(&ctx->loc, "<copyright> takes no attributes");
 		if (ctx->parent != PROTOCOL)
 			fail(&ctx->loc, "<copyright> must be under <protocol>");
+		if (ctx->copyright_forbidden)
+			fail(&ctx->loc, "<copyright> element not allowed here");
 	} else if (element == INTERFACE) {
 		if (name == NULL)
 			fail(&ctx->loc, "no interface name given");
@@ -871,6 +878,7 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (version == 0)
 			fail(&ctx->loc, "no interface version given");
 
+		/* must be valid since version and name given */
 		if (atts[4])
 			fail(&ctx->loc, "unexpected attribute on interface");
 
@@ -879,7 +887,6 @@ start_element(void *data, const char *element_name, const char **atts)
 		ctx->interface = interface;
 		wl_list_insert(ctx->protocol->interface_list.prev,
 			       &interface->link);
-		ctx->copyright_forbidden = true;
 	} else if (element == REQUEST || element == EVENT) {
 		if (name == NULL)
 			fail(&ctx->loc, "no %s name given", element_name);
@@ -902,6 +909,11 @@ start_element(void *data, const char *element_name, const char **atts)
 			message->destructor = 1;
 		}
 
+		/* Check for unexpected attributes */
+		if (atts[(1 + message->destructor +
+		         (since != NULL) + (deprecated_since != NULL)) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
+
 		version = version_from_since(ctx, since);
 		if (version < ctx->interface->since)
 			fail(&ctx->loc, "since version not increasing\n");
@@ -922,6 +934,8 @@ start_element(void *data, const char *element_name, const char **atts)
 	} else if (element == ARG) {
 		if (name == NULL)
 			fail(&ctx->loc, "no argument name given");
+		if (type == NULL)
+			fail(&ctx->loc, "no argument type given");
 		if (ctx->parent != REQUEST && ctx->parent != EVENT)
 			fail(&ctx->loc, "<arg> must be child of <request> or <event>");
 
@@ -929,6 +943,8 @@ start_element(void *data, const char *element_name, const char **atts)
 		arg = create_arg(name);
 		if (!set_arg_type(arg, type))
 			fail(&ctx->loc, "unknown type (%s)", type);
+		if (atts[(2 + !!summary + !!interface_name + !!allow_null + !!enumeration_name) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		switch (arg->type) {
 		case NEW_ID:
@@ -976,6 +992,8 @@ start_element(void *data, const char *element_name, const char **atts)
 			fail(&ctx->loc, "no enum name given");
 		if (ctx->parent != INTERFACE)
 			fail(&ctx->loc, "<enum> not child of <interface>");
+		if (atts[(1 + !!since + !!bitfield) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		enumeration = create_enumeration(name);
@@ -996,8 +1014,12 @@ start_element(void *data, const char *element_name, const char **atts)
 	} else if (element == ENTRY) {
 		if (name == NULL)
 			fail(&ctx->loc, "no entry name given");
+		if (value == NULL)
+			fail(&ctx->loc, "no entry value given");
 		if (ctx->parent != ENUM)
 			fail(&ctx->loc, "<%s> not child of <enum>", element_name);
+		if (atts[(2 + !!since + !!summary + !!deprecated_since) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		entry = create_entry(name, value);
@@ -1028,6 +1050,8 @@ start_element(void *data, const char *element_name, const char **atts)
 		/* must be valid since summary attribute present */
 		if (atts[2])
 			fail(&ctx->loc, "too many attributes for <description>");
+		if (ctx->description_forbidden)
+			fail(&ctx->loc, "description not allowed here");
 
 		description = xzalloc(sizeof *description);
 		description->summary = xstrdup(summary);
@@ -1136,6 +1160,8 @@ static void
 end_element(void *data, const XML_Char *name)
 {
 	struct parse_context *ctx = data;
+	ctx->copyright_forbidden = true;
+	ctx->description_forbidden = true;
 
 	switch (parse_element_name(ctx, name)) {
 	case COPYRIGHT:
@@ -1143,6 +1169,7 @@ end_element(void *data, const XML_Char *name)
 			fail_on_null(strndup(ctx->character_data,
 				             ctx->character_data_length));
 		ctx->parent = PROTOCOL;
+		ctx->description_forbidden = false;
 		break;
 	case DESCRIPTION:
 		ctx->description->text =
@@ -1181,6 +1208,10 @@ end_element(void *data, const XML_Char *name)
 		ctx->parent = ctx->message->direction;
 		break;
 	case INTERFACE:
+		if (wl_list_empty(&ctx->interface->request_list) &&
+		    wl_list_empty(&ctx->interface->event_list)) {
+			fail(&ctx->loc, "Interface defines no requests and no events");
+		}
 		ctx->parent = PROTOCOL;
 		break;
 	default:
@@ -2163,7 +2194,7 @@ int main(int argc, char *argv[])
 	bool core_headers = false;
 	bool version = false;
 	bool strict = false;
-	bool fail = false;
+	bool bad_opt = false;
 	int opt;
 	enum {
 		CLIENT_HEADER,
@@ -2202,7 +2233,7 @@ int main(int argc, char *argv[])
 			strict = true;
 			break;
 		default:
-			fail = true;
+			bad_opt = true;
 			break;
 		}
 	}
@@ -2214,7 +2245,7 @@ int main(int argc, char *argv[])
 		usage(EXIT_SUCCESS);
 	else if (version)
 		scanner_version(EXIT_SUCCESS);
-	else if ((argc != 1 && argc != 3) || fail)
+	else if ((argc != 1 && argc != 3) || bad_opt)
 		usage(EXIT_FAILURE);
 	else if (strcmp(argv[0], "help") == 0)
 		usage(EXIT_SUCCESS);
@@ -2307,6 +2338,10 @@ int main(int argc, char *argv[])
 	} while (len > 0);
 
 	XML_ParserFree(ctx.parser);
+	ctx.parser = NULL;
+
+	if (wl_list_empty(&ctx.protocol->interface_list))
+		fail(&ctx.loc, "Protocol defines no interfaces");
 
 	switch (mode) {
 		case CLIENT_HEADER:
