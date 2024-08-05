@@ -32,6 +32,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -70,7 +71,19 @@ struct wl_connection {
 	int fd;
 	int want_flush;
 };
-#define WL_BUFFER_MAX_SIZE_POT ((size_t)(8 * sizeof(size_t) - 1))
+
+/* Pointer arithmetic beyond PTRDIFF_MAX is broken, so don't rely on it.
+ * ((ptrdiff_t)1 << (CHAR_BIT * sizeof(ptrdiff_t) - 1)) is undefined behavior
+ * (wrapping to PTRDIFF_MIN with -fwrapv), not PTRDIFF_MAX, so limit buffer size
+ * to ((size_t)1 << (CHAR_BIT * sizeof(ptrdiff_t) - 2)).  int is used for
+ * sizes in various places, so for safety also use
+ * ((size_t)1 << (CHAR_BIT * sizeof(int) - 2)) as a limit.
+ */
+#if PTRDIFF_MAX < INT_MAX
+# define WL_BUFFER_MAX_SIZE_POT ((size_t)(CHAR_BIT * sizeof(ptrdiff_t) - 2))
+#else
+# define WL_BUFFER_MAX_SIZE_POT ((size_t)(CHAR_BIT * sizeof(int) - 2))
+#endif
 
 static inline size_t
 size_pot(uint32_t size_bits)
