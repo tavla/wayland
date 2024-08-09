@@ -91,19 +91,45 @@ ring_buffer_mask(const struct wl_ring_buffer *b, size_t i) {
 	return i & m;
 }
 
+static size_t
+ring_buffer_size(struct wl_ring_buffer *b)
+{
+	return b->head - b->tail;
+}
+
+/* Precondition: the data will not overflow the buffer */
 static int
 ring_buffer_put(struct wl_ring_buffer *b, const void *data, size_t count)
 {
-	size_t head, size;
+	size_t head, size, buffer_size, capacity;
+
+	if (b->head < b->tail) {
+		wl_abort("ring_buffer_put: ring buffer corrupt, %zu < %zu\n",
+		         b->head, b->tail);
+	}
+
+	capacity = ring_buffer_capacity(b);
+	buffer_size = ring_buffer_size(b);
+	if (buffer_size > capacity) {
+		wl_abort("ring_buffer_put: ring buffer corrupt: "
+		         "%zu - %zu > %zu\n", b->head, b->tail, capacity);
+	}
 
 	if (count == 0)
 		return 0;
 
+	if (capacity - buffer_size < count) {
+		wl_abort("ring_buffer_put: attempt to overfill buffer: "
+		         "%zu - %zu < %zu\n", capacity, buffer_size, count);
+	}
+
 	head = ring_buffer_mask(b, b->head);
-	if (head + count <= ring_buffer_capacity(b)) {
+	size = capacity - head;
+	if (count <= size) {
+		/* Enough space after head to fulfill request */
 		memcpy(b->data + head, data, count);
 	} else {
-		size = ring_buffer_capacity(b) - head;
+		/* Need to wrap around */
 		memcpy(b->data + head, data, size);
 		memcpy(b->data, (const char *) data + size, count - size);
 	}
@@ -117,24 +143,54 @@ ring_buffer_put(struct wl_ring_buffer *b, const void *data, size_t count)
 static void
 ring_buffer_put_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 {
-	size_t head, tail;
+	size_t head, tail, size, capacity;
+
+	if (b->head < b->tail) {
+		wl_abort("ring_buffer_put_iov: ring buffer corrupt, %zu < %zu\n",
+		         b->head, b->tail);
+	}
+
+	size = ring_buffer_size(b);
+	capacity = ring_buffer_capacity(b);
+	if (size >= capacity) {
+		wl_abort("ring_buffer_put_iov: ring buffer full or corrupt: "
+		         "%zu - %zu >= %zu\n", b->head, b->tail, capacity);
+	}
 
 	head = ring_buffer_mask(b, b->head);
 	tail = ring_buffer_mask(b, b->tail);
 	if (head < tail) {
+		/* Buffer is like this:
+		 *         head              tail
+		 *           |                 |
+		 * +---------+-----------------+---------+
+		 * | VALID   | INVALID         | VALID   |
+		 * +---------+-----------------+---------+
+		 */
 		iov[0].iov_base = b->data + head;
 		iov[0].iov_len = tail - head;
 		*count = 1;
 	} else if (tail == 0) {
-		/* We assume that head == 0 means an empty buffer, not a full one. */
+		/* Buffer is like this:
+		 * tail                       head
+		 * |                           |
+		 * +---------------------------+---------+
+		 * | VALID                     | INVALID |
+		 * +---------------------------+---------+
+		 */
 		iov[0].iov_base = b->data + head;
-		iov[0].iov_len = ring_buffer_capacity(b) - head;
+		iov[0].iov_len = capacity - head;
 		*count = 1;
 	} else {
-		/* head == 0 is checked earlier, so there is at least one byte to
-		 * read after head. */
+		/* Buffer is like this:
+		 *         tail              head
+		 *           |                 |
+		 * +---------------------------+---------+
+		 * | INVALID | VALID           | INVALID |
+		 * +---------------------------+---------+
+		 */
 		iov[0].iov_base = b->data + head;
-		iov[0].iov_len = ring_buffer_capacity(b) - head;
+		iov[0].iov_len = capacity - head;
 		iov[1].iov_base = b->data;
 		iov[1].iov_len = tail;
 		*count = 2;
@@ -145,50 +201,96 @@ ring_buffer_put_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 static void
 ring_buffer_get_iov(struct wl_ring_buffer *b, struct iovec *iov, int *count)
 {
-	size_t head, tail;
+	size_t head, tail, capacity;
+
+	if (b->head <= b->tail) {
+		wl_abort("ring_buffer_get_iov(): empty or corrupt buffer: %zu <= %zu\n",
+		         b->head, b->tail);
+	}
+
+	capacity = ring_buffer_capacity(b);
+	if (ring_buffer_size(b) > capacity) {
+		wl_abort("ring_buffer_put_iov: ring buffer corrupt: "
+		         "%zu - %zu > %zu\n", b->head, b->tail, capacity);
+	}
 
 	head = ring_buffer_mask(b, b->head);
 	tail = ring_buffer_mask(b, b->tail);
 	if (tail < head) {
+		/* Buffer is like this:
+		 *         tail              head
+		 *           |                 |
+		 * +---------+-----------------+---------+
+		 * | INVALID |     VALID       | INVALID |
+		 * +---------+-----------------+---------+
+		 */
 		iov[0].iov_base = b->data + tail;
 		iov[0].iov_len = head - tail;
 		*count = 1;
 	} else if (head == 0) {
+		/* Buffer is like this:
+		 * head                      tail
+		 * |                           |
+		 * +---------------------------+---------+
+		 * |             INVALID       | VALID   |
+		 * +---------------------------+---------+
+		 */
 		iov[0].iov_base = b->data + tail;
-		iov[0].iov_len = ring_buffer_capacity(b) - tail;
+		iov[0].iov_len = capacity - tail;
 		*count = 1;
 	} else {
+		/* Buffer is like this:
+		 *       head                tail
+		 *         |                   |
+		 * +-------+-------------------+---------+
+		 * | VALID |      INVALID      | VALID   |
+		 * +---------------------------+---------+
+		 */
 		iov[0].iov_base = b->data + tail;
-		iov[0].iov_len = ring_buffer_capacity(b) - tail;
+		iov[0].iov_len = capacity - tail;
 		iov[1].iov_base = b->data;
 		iov[1].iov_len = head;
 		*count = 2;
 	}
 }
 
-/* Precondition: the data will not overflow the buffer */
+/* Precondition: the data will not underflow the buffer */
 static void
 ring_buffer_copy(struct wl_ring_buffer *b, void *data, size_t count)
 {
-	size_t tail, size;
+	size_t tail, size, buffer_size, capacity;
+
+	if (b->head < b->tail) {
+		wl_abort("ring_buffer_copy(): ring buffer corrupt, %zu < %zu\n",
+		         b->head, b->tail);
+	}
+
+	buffer_size = ring_buffer_size(b);
+	capacity = ring_buffer_capacity(b);
+	if (buffer_size > capacity) {
+		wl_abort("ring_buffer_copy(): ring buffer corrupt: "
+		         "%zu - %zu > %zu\n", b->head, b->tail, capacity);
+	}
 
 	if (count == 0)
 		return;
 
+	if (buffer_size < count) {
+		wl_abort("ring_buffer_copy(): attempt to copy %zu bytes "
+		         "but buffer has %zu bytes\n",
+		         count, buffer_size);
+	}
+
 	tail = ring_buffer_mask(b, b->tail);
-	if (tail + count <= ring_buffer_capacity(b)) {
+	size = capacity - tail;
+	if (count <= size) {
+		/* Enough data after the tail to fulfill the request */
 		memcpy(data, b->data + tail, count);
 	} else {
-		size = ring_buffer_capacity(b) - tail;
+		/* Must wrap buffer around */
 		memcpy(data, b->data + tail, size);
 		memcpy((char *) data + size, b->data, count - size);
 	}
-}
-
-static size_t
-ring_buffer_size(struct wl_ring_buffer *b)
-{
-	return b->head - b->tail;
 }
 
 static char *
