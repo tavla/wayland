@@ -752,6 +752,8 @@ start_element(void *data, const char *element_name, const char **atts)
 			version = strtouint(atts[i + 1]);
 			if (version == -1)
 				fail(&ctx->loc, "wrong version (%s)", atts[i + 1]);
+			if (version == 0)
+				fail(&ctx->loc, "version 0 is invalid");
 		} else if (strcmp(atts[i], "type") == 0)
 			type = atts[i + 1];
 		else if (strcmp(atts[i], "value") == 0)
