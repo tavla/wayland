@@ -197,8 +197,11 @@ get_max_size_bits_for_size(size_t buffer_size)
 {
 	uint32_t max_size_bits = WL_BUFFER_DEFAULT_SIZE_POT;
 
+	/* The -1 is optional but saves an iteration of the next loop. */
+	if (size_pot(WL_BUFFER_MAX_SIZE_POT - 1) < buffer_size)
+		return WL_BUFFER_MAX_SIZE_POT;
 
-	while (buffer_size < WL_BUFFER_MAX_SIZE_POT && size_pot(max_size_bits) < buffer_size)
+	while (size_pot(max_size_bits) < buffer_size)
 		max_size_bits++;
 
 	return max_size_bits;
