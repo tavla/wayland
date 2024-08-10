@@ -826,7 +826,7 @@ start_element(void *data, const char *element_name, const char **atts)
 
 		version = version_from_since(ctx, since);
 		if (version < ctx->interface->since)
-			warn(&ctx->loc, "since version not increasing\n");
+			fail(&ctx->loc, "since version not increasing\n");
 		ctx->interface->since = version;
 		message->since = version;
 
