@@ -70,12 +70,13 @@ struct wl_connection {
 	int fd;
 	int want_flush;
 };
+#define WL_BUFFER_MAX_SIZE_POT ((size_t)(8 * sizeof(size_t) - 1))
 
 static inline size_t
 size_pot(uint32_t size_bits)
 {
-	if (!(size_bits < 8 * sizeof(size_t)))
-		wl_abort("Too many bits for size_t\n");
+	if (size_bits > WL_BUFFER_MAX_SIZE_POT)
+		wl_abort("Too many bits for ring buffer\n");
 
 	return ((size_t)1) << size_bits;
 }
