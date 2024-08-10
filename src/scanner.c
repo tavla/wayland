@@ -770,22 +770,27 @@ start_element(void *data, const char *element_name, const char **atts)
 			allow_null = atts[i + 1];
 		else if (strcmp(atts[i], "enum") == 0)
 			enumeration_name = atts[i + 1];
-		else if (strcmp(atts[i], "bitfield") == 0)
+		else if (strcmp(atts[i], "bitfield") == 0) {
+			if (strcmp(element_name, "enum"))
+				fail(&ctx->loc, "bitfield attribute only valid on enum element");
 			bitfield = atts[i + 1];
-		else
+		} else {
 			fail(&ctx->loc, "invalid attribute name (%s)", atts[i]);
+		}
 	}
 
 	ctx->character_data_length = 0;
 	if (strcmp(element_name, "protocol") == 0) {
 		if (name == NULL)
 			fail(&ctx->loc, "no protocol name given");
-
+		if (atts[2])
+			fail(&ctx->loc, "Unexpected attribute for protocol element");
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		ctx->protocol->name = xstrdup(name);
 		ctx->protocol->uppercase_name = uppercase_dup(name);
 	} else if (strcmp(element_name, "copyright") == 0) {
-
+		if (atts[0])
+			fail(&ctx->loc, "copyright element takes no attributes");
 	} else if (strcmp(element_name, "interface") == 0) {
 		if (name == NULL)
 			fail(&ctx->loc, "no interface name given");
