@@ -1063,14 +1063,14 @@ wl_connection_demarshal(struct wl_connection *connection,
 		case WL_ARG_STRING:
 			length = *p++;
 
-			if (length == 0 && !arg.nullable) {
-				wl_log("NULL string received on non-nullable "
-				       "type, message %s(%s)\n", message->name,
-				       message->signature);
-				errno = EINVAL;
-				goto err;
-			}
 			if (length == 0) {
+				if (!arg.nullable) {
+					wl_log("NULL string received on non-nullable "
+							"type, message %s(%s)\n", message->name,
+							message->signature);
+					errno = EINVAL;
+					goto err;
+				}
 				closure->args[i].s = NULL;
 				break;
 			}
@@ -1088,7 +1088,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 
 			s = (char *) p;
 
-			if (length > 0 && s[length - 1] != '\0') {
+			if (s[length - 1] != '\0') {
 				wl_log("string not nul-terminated, "
 				       "message %s(%s)\n",
 				       message->name, message->signature);
