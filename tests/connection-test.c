@@ -807,6 +807,51 @@ leak_after_error(void)
 	free(c);
 }
 
+static void
+too_long_message(void *arg)
+{
+#define TOO_LONG ((size_t)(4096 - 12 + 1))
+	void *buf = malloc(TOO_LONG);
+	assert(buf);
+	memset(buf, 0, TOO_LONG);
+	struct client *c = client_connect();
+	struct wl_array arr = { TOO_LONG - 1, TOO_LONG, buf };
+	set_buffer_size(c, *(uint32_t *)arg);
+	long_request(c, &arr);
+	wl_display_roundtrip(c->wl_display);
+	assert(wl_display_get_error(c->wl_display) == 0);
+	arr.size += 1;
+	long_request(c, &arr);
+	wl_display_dispatch(c->wl_display);
+	assert(wl_display_get_error(c->wl_display) == EINVAL);
+	wl_proxy_destroy((struct wl_proxy *) c->tc);
+	wl_display_disconnect(c->wl_display);
+	free(c);
+	free(buf);
+}
+
+TEST(overlong_message_small_buffer)
+{
+	struct display *d = display_create();
+
+	uint32_t size = 4096;
+	client_create(d, too_long_message, &size);
+	display_run(d);
+
+	display_destroy(d);
+}
+
+TEST(overlong_message_long_buffer)
+{
+	struct display *d = display_create();
+
+	uint32_t size = 8192;
+	client_create(d, too_long_message, &size);
+	display_run(d);
+
+	display_destroy(d);
+}
+
 TEST(closure_leaks_after_error)
 {
 	struct display *d = display_create();

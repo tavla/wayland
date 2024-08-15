@@ -75,6 +75,8 @@ struct client *client_connect(void);
 void client_disconnect(struct client *);
 int stop_display(struct client *, int);
 void noop_request(struct client *);
+void long_request(struct client *c, struct wl_array *a);
+void set_buffer_size(struct client *c, uint32_t size);
 
 /**
  * Usual workflow:
