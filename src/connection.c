@@ -1495,7 +1495,7 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 	struct argument_details arg;
 	const char *signature = closure->message->signature;
 	struct timespec tp;
-	unsigned int time;
+	uint64_t time;
 	uint32_t nval;
 	FILE *f;
 	char *buffer;
@@ -1506,9 +1506,10 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 		return;
 
 	clock_gettime(CLOCK_REALTIME, &tp);
-	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
+	time = (uint64_t)((tp.tv_sec % 10000L) * 1000000L + tp.tv_nsec / 1000);
 
-	fprintf(f, "[%7u.%03u] ", time / 1000, time % 1000);
+	/* Time since Unix epoch in milliseconds, mod 10000 seconds */
+	fprintf(f, "[%7u.%03u] ", (unsigned int)(time / 1000), (unsigned int)(time % 1000));
 
 	if (queue_name)
 		fprintf(f, "{%s} ", queue_name);
