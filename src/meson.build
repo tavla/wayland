@@ -78,6 +78,10 @@ if get_option('scanner')
 			variables: { 'wayland_scanner': 'wayland-scanner' },
 		))
 	endif
+
+	dir_prefix = get_option('prefix')
+	dir_man = join_paths(dir_prefix, get_option('mandir'))
+	subdir('man')
 endif
 
 if meson.is_cross_build() or not get_option('scanner')
