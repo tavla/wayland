@@ -229,13 +229,15 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection);
 void
 wl_closure_print(struct wl_closure *closure,
 		 struct wl_object *target, int send, int discarded,
-		 uint32_t (*n_parse)(union wl_argument *arg),
+		 pid_t client_pid, uint32_t (*n_parse)(union wl_argument *arg),
 		 const char *queue_name);
 
 void
 wl_closure_destroy(struct wl_closure *closure);
 
 extern wl_log_func_t wl_log_handler;
+
+extern enum wl_time_format wl_time_fmt;
 
 void wl_log(const char *fmt, ...);
 void wl_abort(const char *fmt, ...);
