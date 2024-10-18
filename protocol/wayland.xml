@@ -2464,6 +2464,10 @@
 
 	From version 7 onwards, the fd must be mapped with MAP_PRIVATE by
 	the recipient, as MAP_SHARED may fail.
+
+	From version 10 onwards, if the wl_keyboard has an active surface
+	immediately before this event, the compositor must send modifiers and
+	keys events immediately after this event.
       </description>
       <arg name="format" type="uint" enum="keymap_format" summary="keymap format"/>
       <arg name="fd" type="fd" summary="keymap file descriptor"/>
@@ -2607,6 +2611,20 @@
 	   summary="the rate of repeating keys in characters per second"/>
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
+    </event>
+
+    <!-- Version 10 additions -->
+
+    <event name="keys" since="10">
+      <description summary="logically down keys">
+	Notifies the client that the set of logically down keys has changed.
+
+	In the wl_keyboard logical state, this event replaces the keys currently
+	logically down. The compositor must not send this event if the
+	wl_keyboard did not have an active surface immediately before this
+	event.
+      </description>
+      <arg name="keys" type="array" summary="the keys currently logically down"/>
     </event>
   </interface>
 
