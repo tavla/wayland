@@ -1679,6 +1679,11 @@
 	to affect double-buffered state.
 
 	Other interfaces may add further double-buffered surface state.
+
+	Clients must ensure that the double-buffered state is consistent when
+	making this request. The consistency requirements are documented by
+	requests that manipulate the state. Therefore, clients must use external
+	synchronization whenever they manipulate or commit the state.
       </description>
     </request>
 
