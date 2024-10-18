@@ -1044,8 +1044,15 @@ registry_bind(struct wl_client *client,
 		global->bind(client, global->data, version, id);
 }
 
+static void
+trivial_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
 static const struct wl_registry_interface registry_interface = {
-	registry_bind
+	registry_bind,
+	trivial_destroy,
 };
 
 static void
@@ -1131,6 +1138,25 @@ bind_display(struct wl_client *client, struct wl_display *display)
 	return 0;
 }
 
+static const struct wl_fixes_interface fixes_interface = {
+	.destroy = trivial_destroy,
+};
+
+static void
+bind_fixes(struct wl_client *client,
+           void *data, uint32_t version, uint32_t id)
+{
+	struct wl_resource *resource;
+
+	resource = wl_resource_create(client, &wl_fixes_interface, 1, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(resource, &fixes_interface, data, NULL);
+}
+
 static int
 handle_display_terminate(int fd, uint32_t mask, void *data) {
 	uint64_t term_event;
@@ -1199,6 +1225,11 @@ wl_display_create(void)
 	display->max_buffer_size = WL_BUFFER_DEFAULT_MAX_SIZE;
 
 	wl_array_init(&display->additional_shm_formats);
+
+	if (!wl_global_create(display, &wl_fixes_interface, 1, NULL, bind_fixes)) {
+		wl_display_destroy(display);
+		return NULL;
+	}
 
 	return display;
 
