@@ -973,12 +973,6 @@ wl_event_loop_dispatch_idle(struct wl_event_loop *loop)
 	}
 }
 
-static int
-timespec_to_ms(struct timespec value)
-{
-	return (value.tv_sec * 1000) + (value.tv_nsec / 1000000);
-}
-
 static struct timespec
 ms_to_timespec(int ms)
 {

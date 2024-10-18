@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 
 #define WL_HIDE_DEPRECATED 1
 
@@ -257,5 +258,11 @@ wl_connection_close_fds_in(struct wl_connection *connection, int max);
 void
 wl_connection_set_max_buffer_size(struct wl_connection *connection,
 				  size_t max_buffer_size);
+
+static inline int
+timespec_to_ms(struct timespec value)
+{
+	return (value.tv_sec * 1000) + (value.tv_nsec / 1000000);
+}
 
 #endif

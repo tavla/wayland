@@ -77,6 +77,9 @@ struct wl_event_queue {
 	struct wl_list proxy_list; /**< struct wl_proxy::queue_link */
 	struct wl_display *display;
 	char *name;
+	unsigned int last_dispatch;
+	bool logged_stale_dispatch_warning;
+	struct wl_list link; /**< struct wl_display::queue_list */
 };
 
 struct wl_display {
@@ -102,6 +105,7 @@ struct wl_display {
 	} protocol_error;
 	int fd;
 	struct wl_map objects;
+	struct wl_list queue_list; /**< struct wl_event_queue::link */
 	struct wl_event_queue display_queue;
 	struct wl_event_queue default_queue;
 	pthread_mutex_t mutex;
@@ -114,6 +118,36 @@ struct wl_display {
 /** \endcond */
 
 static int debug_client = 0;
+
+static void
+wl_display_debug_dispatch(struct wl_display *display)
+{
+	struct wl_event_queue *queue;
+	struct timespec tp;
+	unsigned int now;
+
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	now = timespec_to_ms(tp);
+
+	wl_list_for_each(queue, &display->queue_list, link) {
+		if (wl_list_empty(&queue->event_list) ||
+		    queue->logged_stale_dispatch_warning)
+			continue;
+
+		if (now > queue->last_dispatch + 3000) {
+			struct timespec tp;
+			unsigned int realtime;
+
+			clock_gettime(CLOCK_REALTIME, &tp);
+			realtime = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
+			fprintf(stderr, "[%7u.%03u] {%s} has undispatched"
+                                        " events for more than 3 seconds\n",
+                                        realtime / 1000, realtime % 1000,
+                                        queue->name ? queue->name : "Unnamed queue");
+			queue->logged_stale_dispatch_warning = true;
+		}
+	}
+}
 
 /**
  * This helper function wakes up all threads that are
@@ -229,6 +263,15 @@ wl_event_queue_init(struct wl_event_queue *queue,
 	queue->display = display;
 	if (name)
 		queue->name = strdup(name);
+
+	if (debug_client) {
+		struct timespec tp;
+
+		clock_gettime(CLOCK_MONOTONIC, &tp);
+		queue->last_dispatch = timespec_to_ms(tp);
+		queue->logged_stale_dispatch_warning = false;
+	}
+	wl_list_insert(&display->queue_list, &queue->link);
 }
 
 static void
@@ -342,6 +385,7 @@ wl_event_queue_release(struct wl_event_queue *queue)
 		wl_list_remove(&closure->link);
 		destroy_queued_closure(closure);
 	}
+	wl_list_remove(&queue->link);
 }
 
 /** Destroy an event queue
@@ -387,7 +431,6 @@ wl_display_create_queue(struct wl_display *display)
 		return NULL;
 
 	wl_event_queue_init(queue, display, NULL);
-
 	return queue;
 }
 
@@ -901,6 +944,9 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 
 	pthread_mutex_lock(&disp->mutex);
 
+	if (debug_client)
+		wl_display_debug_dispatch(disp);
+
 	message = &proxy->object.interface->methods[opcode];
 	if (interface) {
 		new_proxy = create_outgoing_proxy(proxy, message,
@@ -1238,6 +1284,7 @@ wl_display_connect_to_fd(int fd)
 
 	display->fd = fd;
 	wl_map_init(&display->objects, WL_MAP_CLIENT_SIDE);
+	wl_list_init(&display->queue_list);
 	wl_event_queue_init(&display->default_queue, display, "Default Queue");
 	wl_event_queue_init(&display->display_queue, display, "Display Queue");
 	pthread_mutex_init(&display->mutex, NULL);
@@ -2067,6 +2114,15 @@ wl_display_dispatch_queue_pending(struct wl_display *display,
 	pthread_mutex_lock(&display->mutex);
 
 	ret = dispatch_queue(display, queue);
+
+	if (debug_client) {
+		struct timespec tp;
+
+		clock_gettime(CLOCK_MONOTONIC, &tp);
+		queue->last_dispatch = timespec_to_ms(tp);
+		queue->logged_stale_dispatch_warning = false;
+		wl_display_debug_dispatch(display);
+	}
 
 	pthread_mutex_unlock(&display->mutex);
 
