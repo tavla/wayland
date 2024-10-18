@@ -2126,8 +2126,9 @@
       <description summary="pointer button event">
 	Mouse button click and release notifications.
 
-	The location of the click is given by the last motion or
+	The location of the click is given by the last motion, warp or
 	enter event.
+
 	The time argument is a timestamp with millisecond
 	granularity, with an undefined base.
 
@@ -2426,6 +2427,40 @@
       <arg name="axis" type="uint" enum="axis" summary="axis type"/>
       <arg name="direction" type="uint" enum="axis_relative_direction"
 	  summary="physical direction relative to axis motion"/>
+    </event>
+
+    <!-- Version 10 additions -->
+
+    <event name="warp" since="10">
+      <description summary="pointer warp event">
+	Notification of pointer location change within a surface.
+	This location change is not due to events on the input device,
+	but because either the surface under the pointer was moved and
+	thus the relative position of the pointer changed, or because
+	the compositor changed the pointer position in response to
+	an event like pointer confinement being exited. The arguments
+	surface_x and surface_y are the location relative to the
+	focused surface.
+
+	This event must not occur in the same wl_pointer.frame as the
+	wl_pointer.enter event.
+
+	If the pointer does not move as a result of user input but the
+	logical pointer position within a surface changes as a result
+	of the surface changing. the wl_pointer.warp event should be
+	sent first, followed by the wl_pointer.something.
+	Note that this may be the case with wl_pointer.button.
+
+	The wl_pointer.warp event must always be sent in its own
+	frame without other **wl_pointer** events.
+
+	wl_pointer.warp has the same rules for other events in the same
+	frame as wl_pointer.motion. Warp and motion cannot both be sent
+	in the same frame.
+
+      </description>
+      <arg name="surface_x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="surface_y" type="fixed" summary="surface-local y coordinate"/>
     </event>
   </interface>
 
