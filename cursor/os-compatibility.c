@@ -188,8 +188,8 @@ int
 os_resize_anonymous_file(int fd, off_t size)
 {
 #ifdef HAVE_POSIX_FALLOCATE
-	sigset_t mask;
-	sigset_t old_mask;
+	sigset_t mask, old_mask;
+	int ret;
 
 	/*
 	 * posix_fallocate() might be interrupted, so we need to check
@@ -207,12 +207,12 @@ os_resize_anonymous_file(int fd, off_t size)
 	 * EOPNOTSUPP. In this case we need to fall back to ftruncate
 	 */
 	do {
-		errno = posix_fallocate(fd, 0, size);
-	} while (errno == EINTR);
+		ret = posix_fallocate(fd, 0, size);
+	} while (ret == EINTR);
 	sigprocmask(SIG_SETMASK, &old_mask, NULL);
-	if (errno == 0)
+	if (ret == 0)
 		return 0;
-	else if (errno != EINVAL && errno != EOPNOTSUPP)
+	else if (ret != EINVAL && ret != EOPNOTSUPP)
 		return -1;
 #endif
 	if (ftruncate(fd, size) < 0)
