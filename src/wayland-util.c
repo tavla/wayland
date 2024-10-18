@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <fcntl.h>
+#include <limits.h>
 
 #include "wayland-util.h"
 #include "wayland-private.h"
@@ -474,6 +476,33 @@ wl_abort(const char *fmt, ...)
 	va_end(argp);
 
 	abort();
+}
+
+int debug_with_pid = 0;
+
+#define STAT_SIZE 256
+
+void
+wl_get_name_by_pid(pid_t pid, char* process_name)
+{
+	char buf[STAT_SIZE];
+	char proc_pid_path[PATH_MAX];
+	sprintf(proc_pid_path, "/proc/%d/stat", pid);
+	FILE* fp = fopen(proc_pid_path, "r");
+    if (fp) {
+		if(fgets(buf, STAT_SIZE - 1, fp)){
+			sscanf(buf, "%*s %s", process_name);
+		}
+		fclose(fp);
+	}
+}
+
+enum wl_time_format wl_time_fmt = WL_TIME_FORMAT_LOCAL;
+
+WL_EXPORT void
+wl_set_time_format(enum wl_time_format fmt)
+{
+	wl_time_fmt = fmt;
 }
 
 /** \endcond */

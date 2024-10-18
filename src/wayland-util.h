@@ -35,6 +35,7 @@
 #include <stddef.h>
 #include <inttypes.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #ifdef  __cplusplus
 extern "C" {
@@ -752,6 +753,25 @@ enum wl_iterator_result {
 	/** Continue the iteration */
 	WL_ITERATOR_CONTINUE
 };
+
+void
+wl_get_name_by_pid(pid_t pid, char* process_name);
+
+enum wl_time_format {
+	WL_TIME_FORMAT_EPOCH,
+	WL_TIME_FORMAT_LOCAL,
+};
+
+/**
+ * Set System-Wide time format for wayland logging
+ *
+ * \note Default format is WL_TIME_FORMAT_LOCAL
+ *
+ * \param fmt Time format
+ * \sa wl_time_format
+ */
+void
+wl_set_time_format(enum wl_time_format fmt);
 
 #ifdef  __cplusplus
 }
