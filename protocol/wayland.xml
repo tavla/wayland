@@ -2756,7 +2756,7 @@
     </event>
   </interface>
 
-  <interface name="wl_output" version="4">
+  <interface name="wl_output" version="5">
     <description summary="compositor output region">
       An output describes part of the compositor geometry.  The
       compositor works in the 'compositor coordinate system' and an
@@ -2995,6 +2995,38 @@
 	The description event will be followed by a done event.
       </description>
       <arg name="description" type="string" summary="output description"/>
+    </event>
+
+    <!-- Version 5 additions -->
+
+    <event name="scale120" since="5">
+      <description summary="floating point scaling output properties">
+	This event contains scaling geometry information
+	specific to a scale factor of 120 fractions (v120 scale).
+	It may be sent after binding the output object or if the
+	output scale changes later. If it is not sent,
+	the client should rely on the fixed point scale.
+
+	A scale larger than 120 means that the compositor will
+	automatically scale surface buffers by (scale_120 / 120.0)
+	when rendering. This is used for very high resolution
+	displays where applications rendering at the native
+	resolution would be too small to be legible.
+
+	Compositor with version 5 support must send both fixed scale
+	and v120 scale values. If the v120 scale has not been sent,
+	the client must use a fixed point scale value.
+
+	To ensure proper handling of v120 scale, scaling-aware
+	clients can utilize the "viewporter" protocol.
+	By setting the appropriate viewport and scaling
+	properties using the viewporter protocol,
+	clients can provide a higher-detail image
+	that matches the v120 scale of the output.
+
+	The scale_120 event will be followed by a done event.
+      </description>
+      <arg name="factor120" type="int" summary="scaling factor of the output as a fraction of 120"/>
     </event>
   </interface>
 
