@@ -160,7 +160,7 @@ log_closure(struct wl_resource *resource,
 	struct wl_protocol_logger_message message;
 
 	if (debug_server)
-		wl_closure_print(closure, object, send, false, NULL, NULL);
+		wl_closure_print(closure, object, send, NULL, NULL);
 
 	if (!wl_list_empty(&display->protocol_loggers)) {
 		message.resource = resource;
@@ -903,6 +903,28 @@ WL_EXPORT const char *
 wl_resource_get_class(struct wl_resource *resource)
 {
 	return resource->object.interface->name;
+}
+
+/** Safely converts an object into its corresponding resource
+ *
+ * \param object object to get the resource for
+ * \return A corresponding resource, or NULL on failure
+ *
+ * Safely converts an object into its corresponding resource.
+ *
+ * This is useful for implementing functions that are given a \c wl_argument
+ * array, and that need to do further introspection on the ".o" field, as it
+ * is otherwise an opaque type.
+ *
+ * \memberof wl_resource
+ */
+WL_EXPORT struct wl_resource *
+wl_resource_from_object(struct wl_object *object)
+{
+	struct wl_resource *resource;
+	if (object == NULL)
+		return NULL;
+	return wl_container_of(object, resource, object);
 }
 
 /**

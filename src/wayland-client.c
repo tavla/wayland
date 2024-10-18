@@ -109,11 +109,187 @@ struct wl_display {
 	int reader_count;
 	uint32_t read_serial;
 	pthread_cond_t reader_cond;
+
+	struct wl_list observers;
 };
 
 /** \endcond */
 
+struct wl_client_observer {
+	struct wl_list link;
+	struct wl_display *display;
+	wl_client_message_observer_func_t func;
+	void *user_data;
+};
+
 static int debug_client = 0;
+
+/**
+ * This helper function adjusts the closure arguments before they are logged.
+ * On the client, after the call to create_proxies(), NEW_ID arguments will
+ * point to a wl_proxy accessible via arg.o instead of being an int32
+ * accessible by arg.n, which is what wl_closure_print() attempts to print.
+ * This helper transforms the argument back into an id, so wl_closure_print()
+ * doesn't need to handle that as a special case.
+ *
+ * \param closure  closure to adjust
+ * \param send     if this is closure is for a request
+ *
+ */
+static void
+adjust_closure_args_for_logging(struct wl_closure *closure, bool send)
+{
+	int i;
+	struct argument_details arg;
+	const struct wl_proxy *proxy;
+	const char *signature = closure->message->signature;
+
+	// No adjustment needed for a send.
+	if (send)
+		return;
+
+	for (i = 0; i < closure->count; i++) {
+		signature = get_next_argument(signature, &arg);
+
+		switch (arg.type) {
+		case WL_ARG_NEW_ID:
+			proxy = (struct wl_proxy *)closure->args[i].o;
+			closure->args[i].n = proxy ? proxy->object.id : 0;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+/**
+ * Maps the \c discard_reason to a string suitable for logging.
+ *
+ * \param discarded_reason  reason for discard
+ * \return A string describing the reason, or NULL.
+ *
+ */
+static const char *
+get_discarded_reason_str(
+	enum wl_client_message_discarded_reason discarded_reason)
+{
+	switch (discarded_reason) {
+	case WL_CLIENT_MESSAGE_NOT_DISCARDED:
+		return NULL;
+	case WL_CLIENT_MESSAGE_DISCARD_DEAD_PROXY_ON_DISPATCH:
+		return "dead proxy on dispatch";
+	case WL_CLIENT_MESSAGE_DISCARD_NO_LISTENER_ON_DISPATCH:
+		return "no listener on dispatch";
+	case WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL:
+		return "unknown id on demarshal";
+	}
+	return NULL;
+}
+
+/**
+ * This function helps log closures from the client, assuming logging is
+ * enabled.
+ *
+ * \param closure    closure for the message
+ * \param proxy      proxy for the message
+ * \param send       true if this is closure is for a request
+ * \param discarded_reason  reason if the message is being discarded, or
+ *                          WL_CLIENT_MESSAGE_NOT_DISCARDED
+ * \param queue_name name for the queue for the message
+ *
+ */
+static void
+closure_log(struct wl_closure *closure, struct wl_proxy *proxy, bool send,
+	    enum wl_client_message_discarded_reason discarded_reason, const char *queue_name)
+{
+	struct wl_display *display = proxy->display;
+	const char *discarded_reason_str;
+	struct wl_closure adjusted_closure = { 0 };
+
+	if (!debug_client && wl_list_empty(&display->observers))
+		return;
+
+	// Note: The real closure has extra data (referenced by its args
+	// immediately following the structure in memory, but we don't
+	// need to duplicate that.
+	memcpy(&adjusted_closure, closure, sizeof(struct wl_closure));
+
+	// Adjust the closure arguments.
+	adjust_closure_args_for_logging(&adjusted_closure, send);
+
+	discarded_reason_str = get_discarded_reason_str(discarded_reason);
+
+	if (debug_client)
+		wl_closure_print(&adjusted_closure, &proxy->object, send,
+				 discarded_reason_str, queue_name);
+
+	if (!wl_list_empty(&display->observers)) {
+		enum wl_client_message_type type =
+			send ? WL_CLIENT_MESSAGE_REQUEST
+			     : WL_CLIENT_MESSAGE_EVENT;
+		struct wl_client_observer *observer;
+		struct wl_client_observed_message message;
+
+		message.proxy = proxy;
+		message.message_opcode = adjusted_closure.opcode;
+		message.message = adjusted_closure.message;
+		message.arguments_count = adjusted_closure.count;
+		message.arguments = adjusted_closure.args;
+		message.discarded_reason = discarded_reason;
+		message.discarded_reason_str = discarded_reason_str;
+		message.queue_name = queue_name;
+		wl_list_for_each(observer, &display->observers, link) {
+			observer->func(observer->user_data, type, &message);
+		}
+	}
+}
+
+/**
+ * This function helps log unknown messages on the client, when logging is
+ * enabled.
+ *
+ * \param display    current display
+ * \param zombie     true if there was a zombie for the message target
+ * \param id         id of the proxy this message was meant for
+ * \param opcode     opcode from the message
+ * \param num_fds    number of fd arguments for this message
+ * \param num_bytes  byte size of this message
+ */
+static void
+log_unknown_message(struct wl_display *display, bool zombie, uint32_t id,
+		    int opcode, int num_fds, int num_bytes)
+{
+	char event_detail[100];
+	struct wl_interface unknown_interface = { 0 };
+	struct wl_proxy unknown_proxy = { 0 };
+	struct wl_message unknown_message = { 0 };
+	struct wl_closure unknown_closure = { 0 };
+
+	if (!debug_client && wl_list_empty(&display->observers))
+		return;
+
+	snprintf(event_detail, sizeof event_detail,
+		 "[event %d, %d fds, %d bytes]", opcode, num_fds, num_bytes);
+
+	unknown_interface.name = zombie ? "[zombie]" : "[unknown]";
+
+	unknown_proxy.object.interface = &unknown_interface;
+	unknown_proxy.object.id = id;
+	unknown_proxy.display = display;
+	unknown_proxy.refcount = -1;
+	unknown_proxy.flags = WL_PROXY_FLAG_WRAPPER;
+
+	unknown_message.name = event_detail;
+	unknown_message.signature = "";
+	unknown_message.types = NULL;
+
+	unknown_closure.message = &unknown_message;
+	unknown_closure.opcode = opcode;
+	unknown_closure.proxy = &unknown_proxy;
+
+	closure_log(&unknown_closure, &unknown_proxy, false,
+		    WL_CLIENT_MESSAGE_DISCARD_UNKNOWN_ID_ON_DEMARSHAL, NULL);
+}
 
 /**
  * This helper function wakes up all threads that are
@@ -898,6 +1074,8 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 	struct wl_proxy *new_proxy = NULL;
 	const struct wl_message *message;
 	struct wl_display *disp = proxy->display;
+	struct wl_event_queue *queue = NULL;
+	const char *queue_name = NULL;
 
 	pthread_mutex_lock(&disp->mutex);
 
@@ -923,17 +1101,12 @@ wl_proxy_marshal_array_flags(struct wl_proxy *proxy, uint32_t opcode,
 		goto err_unlock;
 	}
 
-	if (debug_client) {
-		struct wl_event_queue *queue;
-		const char *queue_name = NULL;
+	queue = wl_proxy_get_queue(proxy);
+	if (queue)
+		queue_name = wl_event_queue_get_name(queue);
 
-		queue = wl_proxy_get_queue(proxy);
-		if (queue)
-			queue_name = wl_event_queue_get_name(queue);
-
-		wl_closure_print(closure, &proxy->object, true, false, NULL,
-				 queue_name);
-	}
+	closure_log(closure, proxy, true, WL_CLIENT_MESSAGE_NOT_DISCARDED,
+		    queue_name);
 
 	if (wl_closure_send(closure, proxy->display->connection)) {
 		wl_log("Error sending request for %s.%s: %s\n",
@@ -1243,6 +1416,7 @@ wl_display_connect_to_fd(int fd)
 	pthread_mutex_init(&display->mutex, NULL);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
+	wl_list_init(&display->observers);
 
 	if (wl_map_insert_at(&display->objects, 0, 0, NULL) == -1)
 		goto err_connection;
@@ -1374,6 +1548,7 @@ wl_display_disconnect(struct wl_display *display)
 	free(display->default_queue.name);
 	wl_event_queue_release(&display->display_queue);
 	free(display->display_queue.name);
+	wl_list_remove(&display->observers);
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
 	close(display->fd);
@@ -1552,8 +1727,6 @@ queue_event(struct wl_display *display, int len)
 	struct wl_closure *closure;
 	const struct wl_message *message;
 	struct wl_event_queue *queue;
-	struct timespec tp;
-	unsigned int time;
 	int num_zombie_fds;
 
 	wl_connection_copy(display->connection, p, sizeof p);
@@ -1571,17 +1744,9 @@ queue_event(struct wl_display *display, int len)
 		num_zombie_fds = (zombie && opcode < zombie->event_count) ?
 			zombie->fd_count[opcode] : 0;
 
-		if (debug_client) {
-			clock_gettime(CLOCK_REALTIME, &tp);
-			time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
+		log_unknown_message(display, !!zombie, id, opcode,
+				    num_zombie_fds, size);
 
-			fprintf(stderr, "[%7u.%03u] discarded [%s]#%d.[event %d]"
-				"(%d fd, %d byte)\n",
-				time / 1000, time % 1000,
-				zombie ? "zombie" : "unknown",
-				id, opcode,
-				num_zombie_fds, size);
-		}
 		if (num_zombie_fds > 0)
 			wl_connection_close_fds_in(display->connection,
 						   num_zombie_fds);
@@ -1628,19 +1793,6 @@ queue_event(struct wl_display *display, int len)
 	return size;
 }
 
-static uint32_t
-id_from_object(union wl_argument *arg)
-{
-	struct wl_proxy *proxy;
-
-	if (arg->o) {
-		proxy = (struct wl_proxy *)arg->o;
-		return proxy->object.id;
-	}
-
-	return 0;
-}
-
 static void
 dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 {
@@ -1659,30 +1811,31 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 	proxy = closure->proxy;
 	proxy_destroyed = !!(proxy->flags & WL_PROXY_FLAG_DESTROYED);
 
-	if (debug_client) {
-		bool discarded = proxy_destroyed ||
-				 !(proxy->dispatcher || proxy->object.implementation);
-
-		wl_closure_print(closure, &proxy->object, false, discarded,
-				 id_from_object, queue->name);
-	}
-
 	if (proxy_destroyed) {
-		destroy_queued_closure(closure);
-		return;
-	}
+		closure_log(closure, proxy, false,
+			    WL_CLIENT_MESSAGE_DISCARD_DEAD_PROXY_ON_DISPATCH,
+			    queue->name);
+	} else if (proxy->dispatcher) {
+		closure_log(closure, proxy, false,
+			    WL_CLIENT_MESSAGE_NOT_DISCARDED, queue->name);
 
-	pthread_mutex_unlock(&display->mutex);
-
-	if (proxy->dispatcher) {
+		pthread_mutex_unlock(&display->mutex);
 		wl_closure_dispatch(closure, proxy->dispatcher,
 				    &proxy->object, opcode);
+		pthread_mutex_lock(&display->mutex);
 	} else if (proxy->object.implementation) {
+		closure_log(closure, proxy, false,
+			    WL_CLIENT_MESSAGE_NOT_DISCARDED, queue->name);
+
+		pthread_mutex_unlock(&display->mutex);
 		wl_closure_invoke(closure, WL_CLOSURE_INVOKE_CLIENT,
 				  &proxy->object, opcode, proxy->user_data);
+		pthread_mutex_lock(&display->mutex);
+	} else {
+		closure_log(closure, proxy, false,
+			    WL_CLIENT_MESSAGE_DISCARD_NO_LISTENER_ON_DISPATCH,
+			    queue->name);
 	}
-
-	pthread_mutex_lock(&display->mutex);
 
 	destroy_queued_closure(closure);
 }
@@ -2606,8 +2759,91 @@ wl_proxy_wrapper_destroy(void *proxy_wrapper)
 	free(wrapper);
 }
 
+/** Safely converts an object into its corresponding proxy
+ *
+ * \param object object to get the proxy for
+ * \return A corresponding proxy, or NULL on failure.
+ *
+ * Safely converts an object into its corresponding proxy.
+ *
+ * This is useful for implementing functions that are given a \c wl_argument
+ * array, and that need to do further introspection on the ".o" field, as it
+ * is otherwise an opaque type.
+ *
+ * \memberof wl_proxy
+ */
+WL_EXPORT struct wl_proxy *
+wl_proxy_from_object(struct wl_object *object)
+{
+	struct wl_proxy *proxy;
+	if (object == NULL)
+		return NULL;
+	return wl_container_of(object, proxy, object);
+}
+
 WL_EXPORT void
 wl_log_set_handler_client(wl_log_func_t handler)
 {
 	wl_log_handler = handler;
+}
+
+/** Creates an client message observer.
+ *
+ * Note that the observer can potentially start receiving traffic immediately
+ * after being created, and even before this call returns.
+ *
+ * \param display    client display to register with
+ * \param func       function to call when client messages are observed
+ * \param user_data  \c user_data pointer to pass to the observer
+ *
+ * \return The created observer, or NULL.
+ *
+ * \sa wl_client_observer_destroy
+ *
+ * \memberof wl_display
+ */
+
+WL_EXPORT struct wl_client_observer *
+wl_display_create_client_observer(struct wl_display *display,
+				  wl_client_message_observer_func_t func,
+				  void *user_data)
+{
+	struct wl_client_observer *observer;
+
+	observer = malloc(sizeof *observer);
+	if (!observer)
+		return NULL;
+
+	observer->display = display;
+	observer->func = func;
+	observer->user_data = user_data;
+
+	pthread_mutex_lock(&display->mutex);
+
+	wl_list_insert(&display->observers, &observer->link);
+
+	pthread_mutex_unlock(&display->mutex);
+
+	return observer;
+}
+
+/** Destroys a client message obsever.
+ *
+ * This function destroys a client message observer, and removes it from the
+ * display it was added to with \c wl_display_create_client_observer.
+ *
+ * \param observer observer to destroy.
+ *
+ * \memberof wl_client_observer
+ */
+WL_EXPORT void
+wl_client_observer_destroy(struct wl_client_observer *observer)
+{
+	pthread_mutex_lock(&observer->display->mutex);
+
+	wl_list_remove(&observer->link);
+
+	pthread_mutex_unlock(&observer->display->mutex);
+
+	free(observer);
 }
