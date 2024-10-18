@@ -1686,7 +1686,7 @@
       <description summary="surface enters an output">
 	This is emitted whenever a surface's creation, movement, or resizing
 	results in some part of it being within the scanout region of an
-	output.
+	output. A surface must be mapped before it can enter any outputs.
 
 	Note that a surface may be overlapping with zero or more outputs.
       </description>
@@ -2764,6 +2764,9 @@
       actually visible.  This typically corresponds to a monitor that
       displays part of the compositor space.  This object is published
       as global during start up, or when a monitor is hotplugged.
+
+      When an output global is first bound, wl_surface.enter events should be
+      sent for all surfaces already on that output.
     </description>
 
     <enum name="subpixel">
