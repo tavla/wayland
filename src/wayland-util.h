@@ -568,7 +568,18 @@ wl_array_release(struct wl_array *array);
  */
 void *
 wl_array_add(struct wl_array *array, size_t size);
+/**
+ * Removes a chunk of the specified size at the specified offset
+ *
+ * \param array Array whose data is to be removed
+ * \param offset Offset to remove data at
+ * \param size Size of data to be removed
+ *
+ * \memberof wl_array
+ */
 
+void
+wl_array_remove_at(struct wl_array *array, size_t offset, size_t size);
 /**
  * Copies the contents of \p source to \p array.
  *
