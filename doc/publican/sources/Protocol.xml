@@ -110,8 +110,11 @@
 	</listitem>
 	<listitem>
 	  <para>
-	    The second has 2 parts of 16-bit.  The upper 16-bits are the message
-	    size in bytes, starting at the header (i.e. it has a minimum value of 8).The lower is the request/event opcode.
+	    The second has 2 parts of 16 bits each.  The upper 16 bits are the message
+	    size in bytes, starting at the header (i.e. it has a minimum value of 8).
+	    The lower is the request/event opcode.  The size must be a multiple of 4.
+	    Messages must be sent using the fewest bytes possible, so padding after
+	    the end of a message is not permitted.
 	  </para>
 	</listitem>
       </itemizedlist>
