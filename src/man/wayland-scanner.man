@@ -1,0 +1,77 @@
+.TH WAYLAND-SCANNER 1 "2024-10-15" "@version@"
+.SH NAME
+wayland-scanner \- A utility for generating protocol files for Wayland
+.SH SYNOPSIS
+.B wayland-scanner
+[OPTION]... [INPUT FILE] [OUTPUT FILE]
+.
+.\" ***************************************************************
+.SH DESCRIPTION
+.B wayland-scanner
+is a command-line utility that processes XML protocol files for the Wayland 
+display server protocol. It can generate both C source code and header files
+from protocol description files.
+
+The tool reads an XML file describing Wayland protocol objects and generates
+code to interface with these objects.
+.
+.\" ***************************************************************
+.SH MODES
+wayland-scanner supports several modes that define how the protocol file should be processed:
+.
+.TP
+.B client-header:
+Generates a header file containing the client-side API.
+.
+.TP
+.B server-header:
+Generates a header file containing the server-side API.
+.
+.TP
+.B code:
+Generates the C source code for the protocol interface implementation.
+.
+.TP
+.B private-code:
+Generates the C source code that might be necessary for private protocol objects.
+.SH OPTIONS
+.
+.TP
+.B --include-core-headers: 
+(Optional) Include standard Wayland headers 
+(wayland-client-core.h or wayland-server-core.h) in the generated output.
+.
+.\" ***************************************************************
+.SH USAGE EXAMPLES
+.
+.TP
+.B Generate a client header:
+wayland-scanner client-header protocol.xml protocol-client-header.h
+.
+.TP
+.B Generate server header:
+wayland-scanner server-header protocol.xml protocol-server-header.h
+.
+.TP
+.B Generate the C source code for both client and server:
+wayland-scanner code protocol.xml protocol-code.c
+.
+.TP
+.B Generate private code:
+wayland-scanner private-code protocol.xml protocol-private-code.c
+.
+.\" ***************************************************************
+.SH ARGUMENTS
+.TP 8
+.B INPUT FILE:
+the XML protocol description file.
+.TP 8
+.B OUTPUT FILE:
+the file where the generated code should be written.
+.TP 8
+.B EXIT STATUS
+returns 0 on success, and a non-zero value if an error occurs.
+.
+.\" ***************************************************************
+.SH "SEE ALSO"
+.B wayland(1), wayland-client(1), wayland-server(1)
