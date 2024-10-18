@@ -716,8 +716,7 @@ wl_client_post_implementation_error(struct wl_client *client,
 WL_EXPORT void
 wl_resource_post_no_memory(struct wl_resource *resource)
 {
-	wl_resource_post_error(resource->client->display_resource,
-			       WL_DISPLAY_ERROR_NO_MEMORY, "no memory");
+	wl_client_post_no_memory(resource->client);
 }
 
 /** Detect if a wl_resource uses the deprecated public definition.
