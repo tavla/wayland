@@ -170,7 +170,7 @@ if get_option('libraries')
 		error('We probably need to bump the SONAME of libwayland-server and -client')
 	endif
 
-	wayland_server = library(
+	wayland_server = shared_library(
 		'wayland-server',
 		sources: [
 			wayland_server_protocol_core_h,
@@ -222,7 +222,7 @@ if get_option('libraries')
 		meson.override_dependency('wayland-server', wayland_server_dep)
 	endif
 
-	wayland_client = library(
+	wayland_client = shared_library(
 		'wayland-client',
 		sources: [
 			wayland_client_protocol_core_h,
