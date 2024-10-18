@@ -48,6 +48,13 @@
 
 #define TIMER_REMOVED -2
 
+#ifdef __APPLE__
+struct itimerspec {
+	struct timespec it_interval;
+	struct timespec it_value;
+};
+#endif
+
 struct wl_event_loop;
 struct wl_event_source_interface;
 struct wl_event_source_timer;
