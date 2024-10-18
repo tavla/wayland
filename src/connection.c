@@ -26,6 +26,8 @@
 
 #define _GNU_SOURCE
 
+#include "../config.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -1486,11 +1488,56 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection)
 	return result;
 }
 
+bool
+wl_check_env_token(const char *env, const char *token)
+{
+	const char *ptr = env;
+	size_t token_len;
+
+	if (env == NULL)
+		return false;
+
+	token_len = strlen(token);
+
+	// Scan the string for comma-separated tokens and look for a match.
+	while (true) {
+		const char *end;
+		size_t len;
+
+		// Skip over any leading separators.
+		while (*ptr == ',')
+			ptr++;
+
+		if (*ptr == '\x00')
+			return false;
+
+		end = strchr(ptr + 1, ',');
+
+		// If there isn't another separarator, then the rest of the string
+		// is one token.
+		if (end == NULL)
+			return (strcmp(ptr, token) == 0);
+
+		len = end - ptr;
+		if (len == token_len && memcmp(ptr, token, len) == 0) {
+			return true;
+		}
+
+		// Skip to the next token.
+		ptr += len;
+	}
+
+	return false;
+}
+
 void
 wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 		 int send, int discarded, uint32_t (*n_parse)(union wl_argument *arg),
 		 const char *queue_name)
 {
+#if defined(HAVE_GETTID)
+	static int include_tid = -1;
+#endif // defined(HAVE_GETTID)
 	int i;
 	struct argument_details arg;
 	const char *signature = closure->message->signature;
@@ -1509,6 +1556,15 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target,
 	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
 	fprintf(f, "[%7u.%03u] ", time / 1000, time % 1000);
+
+#if defined(HAVE_GETTID)
+	if (include_tid < 0) {
+		include_tid = wl_check_env_token(getenv("WAYLAND_DEBUG"), "thread_id");
+	}
+
+	if (include_tid)
+		fprintf(f, "TID#%d ", (int) gettid());
+#endif
 
 	if (queue_name)
 		fprintf(f, "{%s} ", queue_name);

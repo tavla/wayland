@@ -1227,7 +1227,7 @@ wl_display_connect_to_fd(int fd)
 	const char *debug;
 
 	debug = getenv("WAYLAND_DEBUG");
-	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
+	if (debug && (wl_check_env_token(debug, "client") || wl_check_env_token(debug, "1")))
 		debug_client = 1;
 
 	display = zalloc(sizeof *display);

@@ -1156,7 +1156,7 @@ wl_display_create(void)
 	const char *debug;
 
 	debug = getenv("WAYLAND_DEBUG");
-	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
+	if (debug && (wl_check_env_token(debug, "server") || wl_check_env_token(debug, "1")))
 		debug_server = 1;
 
 	display = zalloc(sizeof *display);
