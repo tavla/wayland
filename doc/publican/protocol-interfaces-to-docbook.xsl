@@ -17,9 +17,10 @@
       The protocol includes several interfaces which are used for
       interacting with the server.  Each interface provides requests,
       events, and errors (which are really just special events) as described
-      above.  Specific compositor implementations may have their own
-      interfaces provided as extensions, but there are several which are
-      always expected to be present.
+      above.  Within the same interface each request and event is guaranteed
+      to have a unique name.  Specific compositor implementations may have
+      their own interfaces provided as extensions, but there are several
+      which are always expected to be present.
     </para>
 
     <para>
