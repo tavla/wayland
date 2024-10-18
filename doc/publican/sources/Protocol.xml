@@ -347,6 +347,10 @@
       See <xref linkend="protocol-spec-wl_surface"/> for the protocol
       description.
     </para>
+    <para>
+      Unless specified in a protocol extension, buffers are using the sRGB
+      color model and pre-multiplied alpha values.
+    </para>
   </section>
   <section id="sect-Protocol-Input">
     <title>Input</title>
