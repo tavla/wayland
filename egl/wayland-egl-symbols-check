@@ -14,7 +14,15 @@ if ! test -n "$NM"; then
 	exit 99
 fi
 
-AVAIL_FUNCS="$($NM -D --format=bsd --defined-only $LIB | awk '{print $3}')"
+if [ "$(uname)" == "Darwin" ]; then
+  NM_DYNSYM_TABLE=""
+  SYMBOL_PREFIX="_"
+else
+  NM_DYNSYM_TABLE="-D"
+  SYMBOL_PREFIX=""
+fi
+
+AVAIL_FUNCS="$($NM ${NM_DYNSYM_TABLE} --format=bsd --defined-only $LIB | awk '{print $3}')"
 
 # Official ABI, taken from the header.
 REQ_FUNCS="wl_egl_window_resize
@@ -37,7 +45,7 @@ if test -n "$NEW_ABI"; then
 fi
 
 REMOVED_ABI=$(echo "$REQ_FUNCS" | while read func; do
-    echo "$AVAIL_FUNCS" | grep -q "^$func$" && continue
+    echo "$AVAIL_FUNCS" | grep -q "^${SYMBOL_PREFIX}$func$" && continue
 
     echo $func
 done)

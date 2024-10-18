@@ -88,6 +88,30 @@ count_open_fds(void)
 	/* return the current number of entries */
 	return size / sizeof(struct kinfo_file);
 }
+#elif defined(__APPLE__)
+#include <libproc.h>
+
+/* 
+ * On Darwin, use libproc API to get fds of a PID
+ */
+int
+count_open_fds(void)
+{
+	int buffer_size, buffer_used;
+	pid_t pid = getpid();
+	int nfds;
+	struct proc_fdinfo *fdinfo;
+
+	buffer_size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, 0, 0);
+	fdinfo = malloc(buffer_size);
+
+	buffer_used = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fdinfo, buffer_size);
+	assert(buffer_used > 0 && "proc_pidinfo PROC_PIDLISTFDS failed.");
+
+	nfds = buffer_used / PROC_PIDLISTFD_SIZE;
+	free(fdinfo);
+	return nfds;
+}
 #else
 int
 count_open_fds(void)

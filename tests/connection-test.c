@@ -48,7 +48,13 @@ setup(int *s)
 {
 	struct wl_connection *connection;
 
+#ifdef SOCK_CLOEXEC
 	assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, s) == 0);
+#else
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0);
+	assert(set_cloexec_or_close(s[0]) != -1);
+	assert(set_cloexec_or_close(s[1]) != -1);
+#endif
 
 	connection = wl_connection_create(s[0], WL_BUFFER_DEFAULT_MAX_SIZE);
 	assert(connection);
@@ -181,8 +187,14 @@ struct marshal_data {
 static void
 setup_marshal_data(struct marshal_data *data)
 {
+#ifdef SOCK_CLOEXEC
 	assert(socketpair(AF_UNIX,
 			  SOCK_STREAM | SOCK_CLOEXEC, 0, data->s) == 0);
+#else
+	assert(socketpair(AF_UNIX, SOCK_STREAM , 0, data->s) == 0);
+	assert(set_cloexec_or_close(data->s[0]) != -1);
+	assert(set_cloexec_or_close(data->s[1]) != -1);
+#endif
 	data->read_connection = wl_connection_create(data->s[0],
 						     WL_BUFFER_DEFAULT_MAX_SIZE);
 	assert(data->read_connection);
@@ -885,7 +897,13 @@ TEST(request_bogus_size)
 	for (bogus_size = 11; bogus_size >= 0; bogus_size--) {
 		fprintf(stderr, "* bogus size %d\n", bogus_size);
 
+#ifdef SOCK_CLOEXEC
 		assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, s) == 0);
+#else
+		assert(socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0);
+		assert(set_cloexec_or_close(s[0]) != -1);
+		assert(set_cloexec_or_close(s[1]) != -1);
+#endif
 		display = wl_display_create();
 		assert(display);
 		client = wl_client_create(display, s[0]);

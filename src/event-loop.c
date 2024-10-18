@@ -44,6 +44,14 @@
 #include "wayland-server-private.h"
 #include "wayland-os.h"
 
+#ifdef __APPLE__
+/* epoll-shim should provide this by design */
+struct itimerspec {
+	struct timespec it_interval;
+	struct timespec it_value;
+};
+#endif
+
 /** \cond INTERNAL */
 
 #define TIMER_REMOVED -2

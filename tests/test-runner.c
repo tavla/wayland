@@ -63,7 +63,12 @@ static int timeouts_enabled = 1;
 /* set to one if the output goes to the terminal */
 static int is_atty = 0;
 
+#if __APPLE__
+extern const struct test __start_test_section __asm("section$start$__RODATA$test_section");
+extern const struct test __stop_test_section __asm("section$end$__RODATA$test_section");
+#else
 extern const struct test __start_test_section, __stop_test_section;
+#endif
 
 static const struct test *
 find_test(const char *name)
@@ -307,6 +312,23 @@ is_debugger_attached(void)
 	}
 
 	return rc;
+}
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+/* https://stackoverflow.com/a/2200786 */
+static int
+is_debugger_attached(void)
+{
+	int ret;
+	int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+	struct kinfo_proc info;
+	size_t size;
+
+	info.kp_proc.p_flag = 0;
+	ret = sysctl(mib, sizeof(mib) / sizeof(*mib), &info, &size, NULL, 0);
+	assert(ret == 0);
+
+	return ( (info.kp_proc.p_flag & P_TRACED) != 0 );
 }
 #else
 static int

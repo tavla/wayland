@@ -74,18 +74,20 @@ int
 wl_os_socket_cloexec(int domain, int type, int protocol)
 {
 	int fd;
-
+#if !defined(__APPLE__)
+	/* It is ok to bypass this logic on Darwin,
+	   FD_CLOEXEC will be set by set_cloexec_or_close() */
 	fd = wl_socket(domain, type | SOCK_CLOEXEC, protocol);
 	if (fd >= 0)
 		return fd;
 	if (errno != EINVAL)
 		return -1;
-
+#endif
 	fd = wl_socket(domain, type, protocol);
 	return set_cloexec_or_close(fd);
 }
 
-#if defined(__FreeBSD__)
+#if defined(LOCAL_PEERCRED)
 int
 wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 {
@@ -101,6 +103,14 @@ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
 #if HAVE_XUCRED_CR_PID
 	/* Since https://cgit.freebsd.org/src/commit/?id=c5afec6e895a */
 	*pid = ucred.cr_pid;
+#elif defined(LOCAL_PEERPID)
+	/* Try LOCAL_PEERPID if no cr_pid in xucred */
+	size_t pid_size;
+	pid_t peerpid;
+	if (getsockopt(sockfd, SOL_LOCAL, LOCAL_PEERPID, &peerpid, &pid_size))
+		*pid = peerpid;
+	else
+		*pid = 0;
 #else
 	*pid = 0;
 #endif
@@ -178,12 +188,15 @@ recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flags)
 ssize_t
 wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 {
-#if HAVE_BROKEN_MSG_CMSG_CLOEXEC
+#if HAVE_BROKEN_MSG_CMSG_CLOEXEC || defined(__APPLE__)
 	/*
 	 * FreeBSD had a broken implementation of MSG_CMSG_CLOEXEC between 2015
 	 * and 2021, so we have to use the non-MSG_CMSG_CLOEXEC fallback
 	 * directly when compiling against a version that does not include the
 	 * fix (https://cgit.freebsd.org/src/commit/?id=6ceacebdf52211).
+	 */
+	/*
+	 * Darwin has no MSG_CMSG_CLOEXEC, so use fallback too.
 	 */
 #pragma message("Using fallback directly since MSG_CMSG_CLOEXEC is broken.")
 #else
@@ -220,7 +233,7 @@ wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
 	int fd;
 
-#ifdef HAVE_ACCEPT4
+#if defined(HAVE_ACCEPT4) && !defined(__APPLE__)
 	fd = accept4(sockfd, addr, addrlen, SOCK_CLOEXEC);
 	if (fd >= 0)
 		return fd;

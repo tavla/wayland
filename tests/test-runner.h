@@ -37,11 +37,17 @@ struct test {
 	int must_fail;
 } __attribute__ ((aligned (16)));
 
+#if __APPLE__
+#define TEST_SECTION "__RODATA,test_section"
+#else
+#define TEST_SECTION "test_section"
+#endif
+
 #define TEST(name)							\
 	static void name(void);						\
 									\
 	const struct test test##name					\
-		 __attribute__ ((used, section ("test_section"))) = {	\
+		 __attribute__ ((used, section (TEST_SECTION))) = {	\
 		#name, name, 0						\
 	};								\
 									\
@@ -51,7 +57,7 @@ struct test {
 	static void name(void);						\
 									\
 	const struct test test##name					\
-		 __attribute__ ((used, section ("test_section"))) = {	\
+		 __attribute__ ((used, section (TEST_SECTION))) = {	\
 		#name, name, 1						\
 	};								\
 									\
@@ -93,3 +99,28 @@ test_disable_coredumps(void);
 	} while (0);
 
 #endif
+
+/* For systems without SOCK_CLOEXEC */
+#include <fcntl.h>
+__attribute__((used))
+static int
+set_cloexec_or_close(int fd)
+{
+	long flags;
+
+	if (fd == -1)
+		return -1;
+
+	flags = fcntl(fd, F_GETFD);
+	if (flags == -1)
+		goto err;
+
+	if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == -1)
+		goto err;
+
+	return fd;
+
+err:
+	close(fd);
+	return -1;
+}

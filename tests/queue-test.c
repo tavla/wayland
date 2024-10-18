@@ -23,7 +23,26 @@
  * SOFTWARE.
  */
 
+#ifndef __APPLE__
 #define _GNU_SOURCE /* For memrchr */
+#else
+#include <string.h>
+/* No memrchr() on Darwin, borrow one from OpenBSD */
+static void *
+memrchr(const void *s, int c, size_t n)
+{
+	const unsigned char *cp;
+
+	if (n != 0) {
+		cp = (unsigned char *)s + n;
+		do {
+			if (*(--cp) == (unsigned char)c)
+				return((void *)cp);
+		} while (--n != 0);
+	}
+	return(NULL);
+}
+#endif
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
