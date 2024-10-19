@@ -259,6 +259,8 @@ xcursor_read_file_header(FILE *file)
 		return NULL;
 	if (!xcursor_read_uint(file, &head.ntoc))
 		return NULL;
+	if (head.header < XCURSOR_FILE_HEADER_LEN)
+		return NULL;
 	skip = head.header - XCURSOR_FILE_HEADER_LEN;
 	if (skip)
 		if (fseek(file, skip, SEEK_CUR) == EOF)
@@ -571,7 +573,7 @@ xcursor_build_theme_dir(const char *dir, const char *theme)
 	 * add space for any needed directory separators, one per component,
 	 * and one for the trailing null
 	 */
-	full_size = 1 + homelen + 1 + dirlen + 1 + themelen + 1;
+	full_size = (size_t) 1 + homelen + 1 + dirlen + 1 + themelen + 1;
 	full = malloc(full_size);
 	if (!full)
 		return NULL;
@@ -686,11 +688,15 @@ load_all_cursors_from_dir(const char *path, int size,
 			  void *user_data)
 {
 	FILE *f;
-	DIR *dir = opendir(path);
+	DIR *dir;
 	struct dirent *ent;
 	char *full;
 	struct xcursor_images *images;
 
+	if (!path)
+		return;
+
+	dir = opendir(path);
 	if (!dir)
 		return;
 
