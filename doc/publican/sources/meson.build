@@ -53,6 +53,7 @@ publican_sources = [
 	'Revision_History.xml',
 	'Protocol.xml',
 	'Xwayland.xml',
+	'Implementation_Rec.xml',
 	'Compositors.xml',
 	'Client.xml',
 	'Server.xml'

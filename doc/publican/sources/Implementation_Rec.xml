@@ -1,0 +1,167 @@
+<?xml version='1.0' encoding='utf-8' ?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN" "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd" [
+<!ENTITY % BOOK_ENTITIES SYSTEM "Wayland.ent">
+%BOOK_ENTITIES;
+]>
+<chapter id="chap-Implementation-Rec">
+  <title>Implementation Guidelines and Recommendations</title>
+  <section id="sect-Implementation-Rec-Client-Main-Loop">
+    <title>Client Main Loop</title>
+    <para>
+      Wayland clients should have a fully event-driven main loop. While perhaps
+      more complicated to implement than a simple dispatch-then-update main
+      loop at first, an event driven main loop can offer everything a simple
+      main loop can while allowing the program to maintain responsiveness and
+      not waste energy. This is important for all user interactive programs,
+      including games.
+    </para>
+
+    <section id="sect-Implementation-Rec-Event-Loop-Benefits">
+      <title>Event Loop Benefits</title>
+      <para>
+        Clients (applications and toolkits) should be designed to decouple their
+        business logic from their graphical user interface (GUI) updates.
+        Displaying GUI updates (frames) is at a compositor's discretion.
+        Compositors can and will sometimes delay or stop displaying new frames.
+        If the whole client main loop is synchronous to the window display rate,
+        the application may stall or freeze indefinitely. If the application has
+        any other tasks than display, a periodic game state update or network
+        connections for example, it may malfunction when a compositor throttles
+        the display.
+      </para>
+      <para>
+        The decoupling helps also in the other direction. If the application
+        makes long running computations or accesses disks, such operations are
+        good to decimate into short parts or offloaded into another thread. That
+        allows the main loop to process Wayland events and even update the GUI
+        when needed, keeping the application responsive from the user
+        perspective.
+      </para>
+      <para>
+        Keeping the application responsive from the Wayland compositor
+        perspective by timely dispatching any incoming Wayland events is
+        important for keeping the Wayland connection alive. If all message
+        buffers fill up causing a compositor to be unable to queue a message for
+        the client, the client will be disconnected. Wayland protocol design does
+        not allow dropping arbitrary messages without potentially corrupting the
+        connection state between the compositor and the client. While there are
+        some protocol extensions that have mechanisms for checking if the client
+        is still responsive, they may not trigger fast enough (e.g. for 1000 Hz
+        mouse events) or may not be able to block absolutely all messages to the
+        client until the client responds again.
+      </para>
+    </section>
+
+    <section id="sect-Implementation-Rec-Event-Loop-Realization">
+      <title>Event Loop Realization</title>
+      <para>
+        The program architecture with a fully event-driven main loop (event loop)
+        at its core may be a challenge to design and realize. If you need
+        operations that must always run in sequence, you may need to employ a
+        <ulink url="https://en.wikipedia.org/wiki/Finite-state_machine">state machine</ulink>.
+        If you need to run something periodically, a physical simulation update
+        step for instance, you need a timer because the display rate is not a
+        constant. When your application state updates run decoupled from display
+        updates, you need to make sure the display update uses a consistent
+        snapshot of the application state. If you have to repeatedly check whether
+        something is ready or not, you need to do the check right before the
+        event loop goes to sleep, and you need to make sure the event loop wakes
+        up soon enough to check again even if nothing else is happening.
+      </para>
+      <para>
+        The most important thing is for the program to return to the event loop
+        quickly. When the program is asleep waiting for events (Wayland,
+        network, timer, disk I/O, and others), it is ready to respond to any
+        activity immediately. This may be harder to realize than it sounds,
+        because many common APIs, particuarly those that are easy and simple to
+        use, tend to be blocking by nature. A function call will not return until
+        the task is done, and depending on the task it may take any length of
+        time, even indefinitely. When there is no alternative asynchronous or
+        non-blocking API available, such operations should be offloaded to
+        another thread.
+      </para>
+      <para>
+        An example case is the EGL API for the Wayland platform. By default,
+        EGL defines <emphasis>swap interval</emphasis> to be one. This means that
+        <function>eglSwapBuffers</function> will block the caller to throttle
+        posting new frames to the display rate. The usual expectation is that
+        this will only block for a display refresh period duration, but an
+        EGL Wayland platform implementation may block for window presentations
+        (<link linkend="protocol-spec-wl_surface-request-frame">wl_surface::frame</link>
+        callbacks) rather than display refresh cycles. This means that the
+        function call may block indefinitely. To avoid this, the client should
+        set swap interval to zero (on Wayland this does not cause tearing) and
+        throttle its window updates itself, by waiting for
+        <link linkend="protocol-spec-wl_surface-request-frame">wl_surface::frame</link>
+        callbacks for instance.
+      </para>
+      <para>
+        <link linkend="sect-Library-Client">Libwayland-client API</link>
+        has blocking functions as well, but they all have non-blocking
+        counterparts. The blocking versions mainly have use during application
+        initialization and shutdown, and for very simple (toy) applications.
+      </para>
+      <para>
+        There is an important detail about pixel buffers in order to avoid
+        losing frame rate. One might assume it is enough to have two
+        <structname>wl_buffer</structname> objects for a
+        <structname>wl_surface</structname> and do double-buffering by just
+        switching between the two buffers on each window update. This
+        assumption is false. While two is often enough, sometimes it is
+        possible to do with just one, or need three or even more. It depends on
+        what the client and the compositor do. If the client blocks waiting for
+        the previous buffer to be released for re-use, it may stall for a
+        noticeable amount of time. This is unrelated to frame callbacks.
+        Instead, the client should allocate a new buffer when it needs to draw
+        and it has no free buffers available. Managing a buffer pool this way
+        allows the client adapt to the changing needs of the compositor without
+        allocating unnecessary buffers. A sufficient maximum number of buffers
+        should be four per <structname>wl_surface</structname>, however some
+        protocol extensions like sub-surfaces may require more depending on
+        their use.
+      </para>
+    </section>
+
+    <section id="sect-Implementation-Rec-Wayland-Connection-Event-Loop">
+      <title>Wayland Connection in an Event Loop</title>
+      <para>
+        A Wayland connection is represented by a
+        <link linkend="Client-classwl__display">wl_display</link> object.
+        It requires a particular programming pattern to integrate in an event
+        loop. The pattern is explained with
+        <function>wl_display_prepare_read_queue</function> and needs to be
+        adapted to whatever event loop abstraction or API you use.
+        <function>wl_display_get_fd</function> provides the file descriptor to
+        watch.
+      </para>
+      <para>
+        Every Wayland event dispaching context requires its own
+        <link linkend="Client-classwl__event__queue">wl_event_queue</link>
+        and uses the same <function>wl_display_prepare_read_queue</function>
+        sequence or a part of it to wait for and/or dispatch events. A
+        dispatching context is defined by the application architecture: it
+        ensures that the event callback functions registered with the Wayland
+        objects are safe to call. For example, they are called from the right
+        thread, at the right time, and with the correct locks held (or
+        specifically not held). A <structname>wl_display</structname> object
+        always contains one event queue already: the default queue. If you only
+        need one dispatching context, you do not need to create additional
+        queues. Refer to the
+        <link linkend="Client-classwl__display">wl_display</link> documentation
+        for the details.
+      </para>
+      <para>
+        Calling libwayland-client event dispatch from inside an event callback
+        function may have unexpected consequences. Therefore programs should
+        never attempt nesting dispatch calls. Instead, programs should return
+        to their (per thread) event loop when they need to dispatch more
+        events or wait. Note, that all roundtrip functions will also implicitly
+        dispatch any and all other events while waiting for the roundtrip to
+        complete. A program should never call
+        <function>wl_display_roundtrip</function> from inside a Wayland event
+        handler function.
+      </para>
+    </section>
+
+  </section>
+</chapter>
