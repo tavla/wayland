@@ -165,9 +165,13 @@
 	the global using the bind request, the client should now
 	destroy that object.
 
-	The object remains valid and requests to the object will be
-	ignored until the client destroys it, to avoid races between
-	the global going away and a client sending a request to it.
+	Until the client destroys the object, the compositor will
+	ignore other requests to the object except that, for any
+	request that adds new objects to the compositor state,
+	the compositor will continue to add the new objects to
+	its state. These new objects transitively follow the same
+	rules.
+
       </description>
       <arg name="name" type="uint" summary="numeric name of the global object"/>
     </event>
