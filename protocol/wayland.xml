@@ -1588,6 +1588,16 @@
 	surface is not visible in any way, e.g. the surface is off-screen,
 	or completely obscured by other opaque surfaces.
 
+	When a frame request is signaled, all other not-yet-signaled frame
+	requests from applied content updates of the surface are also signaled.
+	Clients should therefore only submit a single frame request for a
+	surface at a time.
+
+	Frame requests of a surface should be signaled on a schedule, that is,
+	when a frame request is signaled, frame requests that are committed
+	afterwards should not be signaled until some time in the future. The
+	spacing between these points in time need not be regular.
+
 	The object returned by this request will be destroyed by the
 	compositor after the callback is fired and as such the client must not
 	attempt to use it after that point.
