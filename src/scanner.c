@@ -651,6 +651,7 @@ validate_identifier(struct location *loc,
 		enum identifier_role role)
 {
 	const char *scan;
+	bool last_was_underscore = true;
 
 	if (!*str) {
 		fail(loc, "element name is empty");
@@ -663,6 +664,12 @@ validate_identifier(struct location *loc,
 		bool is_alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 		bool is_digit = c >= '0' && c <= '9';
 		bool leading_char = (scan == str) && role == STANDALONE_IDENT;
+		if (c == '_' && last_was_underscore)
+			fail(loc,
+			     "'%s' is not a valid identifier: identifiers must "
+			     "not start with an underscore or have consecutive "
+			     "underscores", str);
+		last_was_underscore = c == '_';
 
 		if (is_alpha || c == '_' || (!leading_char && is_digit))
 			continue;
