@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -67,8 +68,8 @@ struct wl_shm_pool {
 #ifndef MREMAP_MAYMOVE
 	/* The following three fields are needed for mremap() emulation. */
 	int mmap_fd;
-	int mmap_flags;
-	int mmap_prot;
+#else
+	bool mapped_yet;
 #endif
 	bool sigbus_is_impossible;
 };
@@ -87,7 +88,7 @@ struct wl_shm_buffer {
 	int32_t width, height;
 	int32_t stride;
 	uint32_t format;
-	int offset;
+	int32_t offset;
 	struct wl_shm_pool *pool;
 };
 
@@ -107,7 +108,7 @@ shm_pool_grow_mapping(struct wl_shm_pool *pool)
 #else
 	data = wl_os_mremap_maymove(pool->mmap_fd, pool->data, &pool->size,
 				    pool->new_size, pool->mmap_prot,
-				    pool->mmap_flags);
+				    MAP_SHARED);
 	if (pool->size != 0 && pool->resource != NULL) {
 		wl_resource_post_error(pool->resource,
 				       WL_SHM_ERROR_INVALID_FD,
@@ -161,7 +162,8 @@ shm_pool_unref(struct wl_shm_pool *pool, bool external)
 
 	munmap(pool->data, pool->size);
 #ifndef MREMAP_MAYMOVE
-	close(pool->mmap_fd);
+	if (pool->mmap_fd != -1)
+		close(pool->mmap_fd);
 #endif
 	free(pool);
 }
@@ -186,22 +188,15 @@ static const struct wl_buffer_interface shm_buffer_interface = {
 };
 
 static bool
-format_is_supported(struct wl_client *client, uint32_t format)
+extra_format_is_supported(struct wl_client *client, uint32_t format)
 {
 	struct wl_display *display = wl_client_get_display(client);
-	struct wl_array *formats;
+	struct wl_array *formats = wl_display_get_additional_shm_formats(display);
 	uint32_t *p;
 
-	switch (format) {
-	case WL_SHM_FORMAT_ARGB8888:
-	case WL_SHM_FORMAT_XRGB8888:
-		return true;
-	default:
-		formats = wl_display_get_additional_shm_formats(display);
-		wl_array_for_each(p, formats)
-			if (*p == format)
-				return true;
-	}
+	wl_array_for_each(p, formats)
+		if (*p == format)
+			return true;
 
 	return false;
 }
@@ -215,7 +210,18 @@ shm_pool_create_buffer(struct wl_client *client, struct wl_resource *resource,
 	struct wl_shm_pool *pool = wl_resource_get_user_data(resource);
 	struct wl_shm_buffer *buffer;
 
-	if (!format_is_supported(client, format)) {
+	switch (format) {
+	case WL_SHM_FORMAT_ARGB8888:
+	case WL_SHM_FORMAT_ARGB8888_NEW:
+		format = WL_SHM_FORMAT_ARGB8888;
+		break;
+	case WL_SHM_FORMAT_XRGB8888:
+	case WL_SHM_FORMAT_XRGB8888_NEW:
+		format = WL_SHM_FORMAT_XRGB8888;
+		break;
+	default:
+		if (extra_format_is_supported(client, format))
+			break;
 		wl_resource_post_error(resource,
 				       WL_SHM_ERROR_INVALID_FORMAT,
 				       "invalid format 0x%x", format);
@@ -227,9 +233,19 @@ shm_pool_create_buffer(struct wl_client *client, struct wl_resource *resource,
 	    offset > pool->size - stride * height) {
 		wl_resource_post_error(resource,
 				       WL_SHM_ERROR_INVALID_STRIDE,
-				       "invalid width, height or stride (%dx%d, %u)",
-				       width, height, stride);
+				       "invalid offset, width, height or stride "
+				       "(%" PRIi32 ", %" PRIi32 "x%" PRIi32 ", %" PRIu32 ")",
+				       offset, width, height, stride);
 		return;
+	}
+
+	if (wl_resource_get_version(resource) > 2) {
+#ifndef MREMAP_MAYMOVE
+		close(pool->mmap_fd);
+		pool->mmap_fd = -1;
+#else
+		pool->mapped_yet = true;
+#endif
 	}
 
 	buffer = zalloc(sizeof *buffer);
@@ -280,11 +296,29 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 		int32_t size)
 {
 	struct wl_shm_pool *pool = wl_resource_get_user_data(resource);
+	uint32_t version = wl_resource_get_version(resource);
 
 	if (size < pool->size) {
 		wl_resource_post_error(resource,
 				       WL_SHM_ERROR_INVALID_FD,
 				       "shrinking pool invalid");
+		return;
+	}
+
+	assert(pool->internal_refcount > 0);
+	assert(pool->external_refcount >= 0);
+	if (version > 2 &&
+#ifndef MREMAP_MAYMOVE
+	    pool->mmap_fd == -1
+#else
+	    pool->mapped_yet
+#endif
+	   ) {
+		wl_resource_post_error(
+			resource,
+			WL_SHM_ERROR_ALREADY_MAPPED,
+			"Cannot resize a pool of version greater than 1 "
+			"once it has been mapped.");
 		return;
 	}
 
@@ -306,23 +340,28 @@ static const struct wl_shm_pool_interface shm_pool_interface = {
 };
 
 static void
-shm_create_pool(struct wl_client *client, struct wl_resource *resource,
-		uint32_t id, int fd, int32_t size)
+shm_create_pool2(struct wl_client *client, struct wl_resource *resource,
+		 uint32_t id, int fd, uint32_t size, uint32_t offset_low,
+		 uint32_t offset_high)
 {
 	struct wl_shm_pool *pool;
 	struct stat statbuf;
+	uint64_t offset;
+	uint32_t version;
 	int seals;
-	int prot;
-	int flags;
 	uint32_t version;
 
-	if (size <= 0) {
+	if (size <= 0 || size > (uint32_t) INT32_MAX) {
 		wl_resource_post_error(resource,
 				       WL_SHM_ERROR_INVALID_STRIDE,
-				       "invalid size (%d)", size);
+				       "invalid size (%" PRIu32 ")", size);
 		goto err_close;
 	}
 
+	static_assert((uint64_t)(off_t) UINT64_MAX == UINT64_MAX,
+		      "libwayland-server must be built with 64-bit (or more) off_t");
+	version = wl_resource_get_version(resource);
+	offset = (uint64_t) offset_high << 32 | (uint64_t) offset_low;
 	pool = zalloc(sizeof *pool);
 	if (pool == NULL) {
 		wl_client_post_no_memory(client);
@@ -346,9 +385,7 @@ shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 	pool->external_refcount = 0;
 	pool->size = size;
 	pool->new_size = size;
-	prot = PROT_READ | PROT_WRITE;
-	flags = MAP_SHARED;
-	pool->data = mmap(NULL, size, prot, flags, fd, 0);
+	pool->data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) offset);
 	if (pool->data == MAP_FAILED) {
 		wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FD,
 				       "failed mmap fd %d: %s", fd,
@@ -358,8 +395,6 @@ shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 #ifndef MREMAP_MAYMOVE
 	/* We may need to keep the fd, prot and flags to emulate mremap(). */
 	pool->mmap_fd = fd;
-	pool->mmap_prot = prot;
-	pool->mmap_flags = flags;
 #else
 	close(fd);
 #endif
@@ -392,9 +427,17 @@ shm_release(struct wl_client *client, struct wl_resource *resource)
 	wl_resource_destroy(resource);
 }
 
+static void
+shm_create_pool(struct wl_client *client, struct wl_resource *resource,
+		uint32_t id, int fd, int32_t size)
+{
+	shm_create_pool2(client, resource, id, fd, (uint32_t) size, 0, 0);
+}
+
 static const struct wl_shm_interface shm_interface = {
-	shm_create_pool,
-	shm_release,
+	.create_pool = shm_create_pool,
+	.release = shm_release,
+	.create_pool2 = shm_create_pool2,
 };
 
 static void
@@ -416,6 +459,8 @@ bind_shm(struct wl_client *client,
 
 	wl_shm_send_format(resource, WL_SHM_FORMAT_ARGB8888);
 	wl_shm_send_format(resource, WL_SHM_FORMAT_XRGB8888);
+	wl_shm_send_format(resource, WL_SHM_FORMAT_ARGB8888_NEW);
+	wl_shm_send_format(resource, WL_SHM_FORMAT_XRGB8888_NEW);
 
 	additional_formats = wl_display_get_additional_shm_formats(display);
 	wl_array_for_each(p, additional_formats)

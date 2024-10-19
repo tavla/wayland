@@ -26,6 +26,7 @@ compiler_flags = [
 	'-Wstrict-prototypes',
 	'-Wmissing-prototypes',
 	'-fvisibility=hidden',
+	'-D_FILE_OFFSET_BITS=64',
 ]
 
 cc = meson.get_compiler('c')
