@@ -2464,6 +2464,9 @@
 
 	From version 7 onwards, the fd must be mapped with MAP_PRIVATE by
 	the recipient, as MAP_SHARED may fail.
+
+	From version 10 onwards, the compositor must not send this event while
+	the wl_keyboard has an active surface.
       </description>
       <arg name="format" type="uint" enum="keymap_format" summary="keymap format"/>
       <arg name="fd" type="fd" summary="keymap file descriptor"/>
@@ -2607,6 +2610,23 @@
 	   summary="the rate of repeating keys in characters per second"/>
       <arg name="delay" type="int"
 	   summary="delay in milliseconds since key down until repeating starts"/>
+    </event>
+
+    <!-- Version 10 additions -->
+
+    <event name="frame" since="10">
+      <description summary="end of a keyboard event sequence">
+	Indicates the end of a set of events that logically belong together.
+
+	Clients should accumulate all wl_keyboard events until they receive a
+	frame event and then apply the events atomically.
+
+	For example, if a leave event is followed by an enter event in the same
+	frame, then the client never lost keyboard focus even though it received
+	a leave event. A compositor might use this to atomically move the
+	keyboard focus between client surfaces or when sending a new
+	wl_keyboard.keymap.
+      </description>
     </event>
   </interface>
 
