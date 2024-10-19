@@ -2756,7 +2756,7 @@
     </event>
   </interface>
 
-  <interface name="wl_output" version="4">
+  <interface name="wl_output" version="5">
     <description summary="compositor output region">
       An output describes part of the compositor geometry.  The
       compositor works in the 'compositor coordinate system' and an
@@ -2995,6 +2995,37 @@
 	The description event will be followed by a done event.
       </description>
       <arg name="description" type="string" summary="output description"/>
+    </event>
+
+    <!-- Version 5 additions -->
+
+    <event name="index" since="5">
+      <description summary="index of this output">
+	Many compositors assign numerical indices to their outputs. The index
+	gives a reliable way to refer to "the first" and "the second" output
+	without relying on static names.
+
+	On a system where outputs are often hot-plugged into different ports, it
+	may not be convenient to refer to outputs by name. Many compositors use
+	the port to determine the output name, which means that a second output
+	will likely have a different name depending on which port it was plugged
+	in.
+
+	Additionally, the compositor can change the index of an output, for
+	example when the user requests to change the order of outputs.
+
+	The exact assignment of indices to outputs is up to the compositor. The
+	indices are not guaranteed to start at 0 or to be consecutive, but they
+	must be unique.
+
+	The index event is sent after binding the output object and whenever the
+	index changes. The index is optional, and may not be sent at all.
+
+	The index event will be followed by a done event. If the index of
+	multiple outputs has changed, an index event for all of those outputs is
+	sent before any done event for one of those outputs.
+      </description>
+      <arg name="name" type="int" summary="output index"/>
     </event>
   </interface>
 
