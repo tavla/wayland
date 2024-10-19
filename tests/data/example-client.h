@@ -950,6 +950,8 @@ wl_display_add_listener(struct wl_display *wl_display,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_DISPLAY_MAX_VERSION 1
+
 #define WL_DISPLAY_SYNC 0
 #define WL_DISPLAY_GET_REGISTRY 1
 
@@ -1088,6 +1090,8 @@ wl_registry_add_listener(struct wl_registry *wl_registry,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_REGISTRY_MAX_VERSION 1
+
 #define WL_REGISTRY_BIND 0
 
 /**
@@ -1175,6 +1179,8 @@ wl_callback_add_listener(struct wl_callback *wl_callback,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_CALLBACK_MAX_VERSION 1
+
 /**
  * @ingroup iface_wl_callback
  */
@@ -1207,6 +1213,8 @@ wl_callback_destroy(struct wl_callback *wl_callback)
 {
 	wl_proxy_destroy((struct wl_proxy *) wl_callback);
 }
+
+#define WL_COMPOSITOR_MAX_VERSION 4
 
 #define WL_COMPOSITOR_CREATE_SURFACE 0
 #define WL_COMPOSITOR_CREATE_REGION 1
@@ -1279,6 +1287,8 @@ wl_compositor_create_region(struct wl_compositor *wl_compositor)
 
 	return (struct wl_region *) id;
 }
+
+#define WL_SHM_POOL_MAX_VERSION 1
 
 #define WL_SHM_POOL_CREATE_BUFFER 0
 #define WL_SHM_POOL_DESTROY 1
@@ -1679,6 +1689,8 @@ wl_shm_add_listener(struct wl_shm *wl_shm,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_SHM_MAX_VERSION 1
+
 #define WL_SHM_CREATE_POOL 0
 
 /**
@@ -1773,6 +1785,8 @@ wl_buffer_add_listener(struct wl_buffer *wl_buffer,
 	return wl_proxy_add_listener((struct wl_proxy *) wl_buffer,
 				     (void (**)(void)) listener, data);
 }
+
+#define WL_BUFFER_MAX_VERSION 1
 
 #define WL_BUFFER_DESTROY 0
 
@@ -1929,6 +1943,8 @@ wl_data_offer_add_listener(struct wl_data_offer *wl_data_offer,
 	return wl_proxy_add_listener((struct wl_proxy *) wl_data_offer,
 				     (void (**)(void)) listener, data);
 }
+
+#define WL_DATA_OFFER_MAX_VERSION 3
 
 #define WL_DATA_OFFER_ACCEPT 0
 #define WL_DATA_OFFER_RECEIVE 1
@@ -2266,6 +2282,8 @@ wl_data_source_add_listener(struct wl_data_source *wl_data_source,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_DATA_SOURCE_MAX_VERSION 3
+
 #define WL_DATA_SOURCE_OFFER 0
 #define WL_DATA_SOURCE_DESTROY 1
 #define WL_DATA_SOURCE_SET_ACTIONS 2
@@ -2503,6 +2521,8 @@ wl_data_device_add_listener(struct wl_data_device *wl_data_device,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_DATA_DEVICE_MAX_VERSION 3
+
 #define WL_DATA_DEVICE_START_DRAG 0
 #define WL_DATA_DEVICE_SET_SELECTION 1
 #define WL_DATA_DEVICE_RELEASE 2
@@ -2687,6 +2707,8 @@ enum wl_data_device_manager_dnd_action {
 };
 #endif /* WL_DATA_DEVICE_MANAGER_DND_ACTION_ENUM */
 
+#define WL_DATA_DEVICE_MANAGER_MAX_VERSION 3
+
 #define WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE 0
 #define WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE 1
 
@@ -2768,6 +2790,8 @@ enum wl_shell_error {
 	WL_SHELL_ERROR_ROLE = 0,
 };
 #endif /* WL_SHELL_ERROR_ENUM */
+
+#define WL_SHELL_MAX_VERSION 1
 
 #define WL_SHELL_GET_SHELL_SURFACE 0
 
@@ -2987,6 +3011,8 @@ wl_shell_surface_add_listener(struct wl_shell_surface *wl_shell_surface,
 	return wl_proxy_add_listener((struct wl_proxy *) wl_shell_surface,
 				     (void (**)(void)) listener, data);
 }
+
+#define WL_SHELL_SURFACE_MAX_VERSION 1
 
 #define WL_SHELL_SURFACE_PONG 0
 #define WL_SHELL_SURFACE_MOVE 1
@@ -3357,6 +3383,8 @@ wl_surface_add_listener(struct wl_surface *wl_surface,
 	return wl_proxy_add_listener((struct wl_proxy *) wl_surface,
 				     (void (**)(void)) listener, data);
 }
+
+#define WL_SURFACE_MAX_VERSION 4
 
 #define WL_SURFACE_DESTROY 0
 #define WL_SURFACE_ATTACH 1
@@ -3881,6 +3909,8 @@ wl_seat_add_listener(struct wl_seat *wl_seat,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_SEAT_MAX_VERSION 6
+
 #define WL_SEAT_GET_POINTER 0
 #define WL_SEAT_GET_KEYBOARD 1
 #define WL_SEAT_GET_TOUCH 2
@@ -4378,6 +4408,8 @@ wl_pointer_add_listener(struct wl_pointer *wl_pointer,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_POINTER_MAX_VERSION 6
+
 #define WL_POINTER_SET_CURSOR 0
 #define WL_POINTER_RELEASE 1
 
@@ -4672,6 +4704,8 @@ wl_keyboard_add_listener(struct wl_keyboard *wl_keyboard,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_KEYBOARD_MAX_VERSION 6
+
 #define WL_KEYBOARD_RELEASE 0
 
 /**
@@ -4909,6 +4943,8 @@ wl_touch_add_listener(struct wl_touch *wl_touch,
 	return wl_proxy_add_listener((struct wl_proxy *) wl_touch,
 				     (void (**)(void)) listener, data);
 }
+
+#define WL_TOUCH_MAX_VERSION 6
 
 #define WL_TOUCH_RELEASE 0
 
@@ -5202,6 +5238,8 @@ wl_output_add_listener(struct wl_output *wl_output,
 				     (void (**)(void)) listener, data);
 }
 
+#define WL_OUTPUT_MAX_VERSION 3
+
 #define WL_OUTPUT_RELEASE 0
 
 /**
@@ -5265,6 +5303,8 @@ wl_output_release(struct wl_output *wl_output)
 	wl_proxy_marshal_flags((struct wl_proxy *) wl_output,
 			 WL_OUTPUT_RELEASE, NULL, wl_proxy_get_version((struct wl_proxy *) wl_output), WL_MARSHAL_FLAG_DESTROY);
 }
+
+#define WL_REGION_MAX_VERSION 1
 
 #define WL_REGION_DESTROY 0
 #define WL_REGION_ADD 1
@@ -5350,6 +5390,8 @@ enum wl_subcompositor_error {
 };
 #endif /* WL_SUBCOMPOSITOR_ERROR_ENUM */
 
+#define WL_SUBCOMPOSITOR_MAX_VERSION 1
+
 #define WL_SUBCOMPOSITOR_DESTROY 0
 #define WL_SUBCOMPOSITOR_GET_SUBSURFACE 1
 
@@ -5428,6 +5470,8 @@ enum wl_subsurface_error {
 	WL_SUBSURFACE_ERROR_BAD_SURFACE = 0,
 };
 #endif /* WL_SUBSURFACE_ERROR_ENUM */
+
+#define WL_SUBSURFACE_MAX_VERSION 1
 
 #define WL_SUBSURFACE_DESTROY 0
 #define WL_SUBSURFACE_SET_POSITION 1

@@ -1102,6 +1102,15 @@ format_text_to_comment(const char *text, bool standalone_comment)
 }
 
 static void
+emit_max_interface_version(struct interface *interface)
+{
+	printf("#define %s_MAX_VERSION %d\n",
+	       interface->uppercase_name, interface->version);
+
+	printf("\n");
+}
+
+static void
 emit_opcodes(struct wl_list *message_list, struct interface *interface)
 {
 	struct message *m;
@@ -1768,12 +1777,14 @@ emit_header(struct protocol *protocol, enum side side)
 
 		if (side == SERVER) {
 			emit_structs(&i->request_list, i, side);
+			emit_max_interface_version(i);
 			emit_opcodes(&i->event_list, i);
 			emit_opcode_versions(&i->event_list, i);
 			emit_opcode_versions(&i->request_list, i);
 			emit_event_wrappers(&i->event_list, i);
 		} else {
 			emit_structs(&i->event_list, i, side);
+			emit_max_interface_version(i);
 			emit_opcodes(&i->request_list, i);
 			emit_opcode_versions(&i->event_list, i);
 			emit_opcode_versions(&i->request_list, i);

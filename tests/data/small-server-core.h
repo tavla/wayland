@@ -203,6 +203,8 @@ struct intf_A_interface {
 			struct wl_resource *resource);
 };
 
+#define INTF_A_MAX_VERSION 3
+
 #define INTF_A_HEY 0
 #define INTF_A_YO 1
 

@@ -960,6 +960,8 @@ struct wl_display_interface {
 			     uint32_t registry);
 };
 
+#define WL_DISPLAY_MAX_VERSION 1
+
 #define WL_DISPLAY_ERROR 0
 #define WL_DISPLAY_DELETE_ID 1
 
@@ -1001,6 +1003,8 @@ struct wl_registry_interface {
 		     uint32_t name,
 		     const char *interface, uint32_t version, uint32_t id);
 };
+
+#define WL_REGISTRY_MAX_VERSION 1
 
 #define WL_REGISTRY_GLOBAL 0
 #define WL_REGISTRY_GLOBAL_REMOVE 1
@@ -1044,6 +1048,8 @@ wl_registry_send_global_remove(struct wl_resource *resource_, uint32_t name)
 {
 	wl_resource_post_event(resource_, WL_REGISTRY_GLOBAL_REMOVE, name);
 }
+
+#define WL_CALLBACK_MAX_VERSION 1
 
 #define WL_CALLBACK_DONE 0
 
@@ -1089,6 +1095,8 @@ struct wl_compositor_interface {
 			      struct wl_resource *resource,
 			      uint32_t id);
 };
+
+#define WL_COMPOSITOR_MAX_VERSION 4
 
 
 /**
@@ -1157,6 +1165,8 @@ struct wl_shm_pool_interface {
 		       struct wl_resource *resource,
 		       int32_t size);
 };
+
+#define WL_SHM_POOL_MAX_VERSION 1
 
 
 /**
@@ -1622,6 +1632,8 @@ struct wl_shm_interface {
 			    int32_t size);
 };
 
+#define WL_SHM_MAX_VERSION 1
+
 #define WL_SHM_FORMAT 0
 
 /**
@@ -1662,6 +1674,8 @@ struct wl_buffer_interface {
 	void (*destroy)(struct wl_client *client,
 			struct wl_resource *resource);
 };
+
+#define WL_BUFFER_MAX_VERSION 1
 
 #define WL_BUFFER_RELEASE 0
 
@@ -1854,6 +1868,8 @@ struct wl_data_offer_interface {
 			    uint32_t preferred_action);
 };
 
+#define WL_DATA_OFFER_MAX_VERSION 3
+
 #define WL_DATA_OFFER_OFFER 0
 #define WL_DATA_OFFER_SOURCE_ACTIONS 1
 #define WL_DATA_OFFER_ACTION 2
@@ -2006,6 +2022,8 @@ struct wl_data_source_interface {
 			    struct wl_resource *resource,
 			    uint32_t dnd_actions);
 };
+
+#define WL_DATA_SOURCE_MAX_VERSION 3
 
 #define WL_DATA_SOURCE_TARGET 0
 #define WL_DATA_SOURCE_SEND 1
@@ -2217,6 +2235,8 @@ struct wl_data_device_interface {
 	void (*release)(struct wl_client *client,
 			struct wl_resource *resource);
 };
+
+#define WL_DATA_DEVICE_MAX_VERSION 3
 
 #define WL_DATA_DEVICE_DATA_OFFER 0
 #define WL_DATA_DEVICE_ENTER 1
@@ -2436,6 +2456,8 @@ struct wl_data_device_manager_interface {
 				struct wl_resource *seat);
 };
 
+#define WL_DATA_DEVICE_MANAGER_MAX_VERSION 3
+
 
 /**
  * @ingroup iface_wl_data_device_manager
@@ -2493,6 +2515,8 @@ struct wl_shell_interface {
 				  uint32_t id,
 				  struct wl_resource *surface);
 };
+
+#define WL_SHELL_MAX_VERSION 1
 
 
 /**
@@ -2880,6 +2904,8 @@ struct wl_shell_surface_interface {
 			  struct wl_resource *resource,
 			  const char *class_);
 };
+
+#define WL_SHELL_SURFACE_MAX_VERSION 1
 
 #define WL_SHELL_SURFACE_PING 0
 #define WL_SHELL_SURFACE_CONFIGURE 1
@@ -3371,6 +3397,8 @@ struct wl_surface_interface {
 			      int32_t height);
 };
 
+#define WL_SURFACE_MAX_VERSION 4
+
 #define WL_SURFACE_ENTER 0
 #define WL_SURFACE_LEAVE 1
 
@@ -3551,6 +3579,8 @@ struct wl_seat_interface {
 	void (*release)(struct wl_client *client,
 			struct wl_resource *resource);
 };
+
+#define WL_SEAT_MAX_VERSION 6
 
 #define WL_SEAT_CAPABILITIES 0
 #define WL_SEAT_NAME 1
@@ -3842,6 +3872,8 @@ struct wl_pointer_interface {
 			struct wl_resource *resource);
 };
 
+#define WL_POINTER_MAX_VERSION 6
+
 #define WL_POINTER_ENTER 0
 #define WL_POINTER_LEAVE 1
 #define WL_POINTER_MOTION 2
@@ -4110,6 +4142,8 @@ struct wl_keyboard_interface {
 			struct wl_resource *resource);
 };
 
+#define WL_KEYBOARD_MAX_VERSION 6
+
 #define WL_KEYBOARD_KEYMAP 0
 #define WL_KEYBOARD_ENTER 1
 #define WL_KEYBOARD_LEAVE 2
@@ -4246,6 +4280,8 @@ struct wl_touch_interface {
 	void (*release)(struct wl_client *client,
 			struct wl_resource *resource);
 };
+
+#define WL_TOUCH_MAX_VERSION 6
 
 #define WL_TOUCH_DOWN 0
 #define WL_TOUCH_UP 1
@@ -4584,6 +4620,8 @@ struct wl_output_interface {
 			struct wl_resource *resource);
 };
 
+#define WL_OUTPUT_MAX_VERSION 3
+
 #define WL_OUTPUT_GEOMETRY 0
 #define WL_OUTPUT_MODE 1
 #define WL_OUTPUT_DONE 2
@@ -4712,6 +4750,8 @@ struct wl_region_interface {
 			 int32_t height);
 };
 
+#define WL_REGION_MAX_VERSION 1
+
 
 /**
  * @ingroup iface_wl_region
@@ -4786,6 +4826,8 @@ struct wl_subcompositor_interface {
 			       struct wl_resource *surface,
 			       struct wl_resource *parent);
 };
+
+#define WL_SUBCOMPOSITOR_MAX_VERSION 1
 
 
 /**
@@ -4945,6 +4987,8 @@ struct wl_subsurface_interface {
 	void (*set_desync)(struct wl_client *client,
 			   struct wl_resource *resource);
 };
+
+#define WL_SUBSURFACE_MAX_VERSION 1
 
 
 /**

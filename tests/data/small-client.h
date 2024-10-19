@@ -157,6 +157,8 @@ intf_A_add_listener(struct intf_A *intf_A,
 				     (void (**)(void)) listener, data);
 }
 
+#define INTF_A_MAX_VERSION 3
+
 #define INTF_A_RQ1 0
 #define INTF_A_RQ2 1
 #define INTF_A_DESTROY 2
