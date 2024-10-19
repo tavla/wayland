@@ -1780,6 +1780,41 @@ _wl_display_add_socket(struct wl_display *display, struct wl_socket *s)
 	return 0;
 }
 
+/** Automatically pick a Wayland display socket for the clients to connect to.
+ *
+ * \param display Wayland display to which the socket should be added.
+ * \return The socket name if success. NULL if failed.
+ *
+ * This function is equivalent to calling, for %d ranging from 0 to 32,
+ * the function:
+ *
+ * \code{.c}
+ *     wl_display_add_socket(display, "wayland-%d")
+ * \endcode
+ *
+ * and returning the name of the new socket as soon as a call succeeds.
+ * The string returned should not be modified or freed.
+ *
+ * Because this function first tries to register the Wayland display
+ * socket name "wayland-0", and clients (for compatibility reasons) try
+ * to connect to "wayland-0" if the environment variable WAYLAND_DISPLAY
+ * is not set, clients may connect by accident. As a result, this function
+ * is NOT recommended. Instead, compositors should explicitly
+ * try socket names starting at e.g. wayland-1; for example:
+ *
+ * \code{.c}
+ *    for (int i = 1; i <= 32; i++) {
+ *       char display_name[16] = "";
+ *       snprintf(display_name, sizeof display_name, "wayland-%d", i);
+ *       if (wl_display_add_socket(display, display_name) == 0) {
+ *          return strdup(display_name);
+ *       }
+ *    }
+ *    return NULL;
+ * \endcode
+ *
+ * \memberof wl_display
+ */
 WL_EXPORT const char *
 wl_display_add_socket_auto(struct wl_display *display)
 {
@@ -1877,7 +1912,13 @@ wl_display_add_socket_fd(struct wl_display *display, int sock_fd)
  *
  * If NULL is passed as name, then it would look for WAYLAND_DISPLAY env
  * variable for the socket name. If WAYLAND_DISPLAY is not set, then default
- * wayland-0 is used.
+ * wayland-0 is used. This fallback, kept for compatibility reasons,
+ * has two problems: 1) most clients will by default connect to wayland-0
+ * if their environment does not contain WAYLAND_DISPLAY, and thus may
+ * connect to this socket by accident when run outside of a GUI; 2) some
+ * clients do not by default connect to wayland-0, and always require
+ * WAYLAND_DISPLAY to be set. Consequently, passing NULL in as an argument
+ * to this function is not recommended.
  *
  * If the socket name is a relative path, the Unix socket will be created in
  * the directory pointed to by environment variable XDG_RUNTIME_DIR. If

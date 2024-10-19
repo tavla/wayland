@@ -1303,7 +1303,8 @@ wl_display_connect_to_fd(int fd)
  *
  * Connect to the Wayland display named \c name. If \c name is \c NULL,
  * its value will be replaced with the WAYLAND_DISPLAY environment
- * variable if it is set, otherwise display "wayland-0" will be used.
+ * variable if it is set. For compatibility reasons, if WAYLAND_DISPLAY
+ * is not set, the value "wayland-0" will be used.
  *
  * If WAYLAND_SOCKET is set, it's interpreted as a file descriptor number
  * referring to an already opened socket. In this case, the socket is used

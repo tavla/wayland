@@ -92,9 +92,12 @@
     <title>Wire Format</title>
     <para>
       The protocol is sent over a UNIX domain stream socket, where the endpoint
-      usually is named <systemitem class="service">wayland-0</systemitem>
-      (although it can be changed via <emphasis>WAYLAND_DISPLAY</emphasis>
-      in the environment). Beginning in Wayland 1.15, implementations can
+      is specified by the environment variable <emphasis>WAYLAND_DISPLAY</emphasis>.
+      (For compatibility reasons, if this environment variable is not set,
+      clients may try to connect to socket <systemitem class="service">wayland-0</systemitem>.
+      As this behavior may lead to accidental connections,
+      compositors are recommended never to set  <emphasis>WAYLAND_DISPLAY</emphasis>
+      to this value.) Beginning in Wayland 1.15, implementations can
       optionally support server socket endpoints located at arbitrary
       locations in the filesystem by setting <emphasis>WAYLAND_DISPLAY</emphasis>
       to the absolute path at which the server endpoint listens.
