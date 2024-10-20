@@ -129,7 +129,7 @@ is_dtd_valid(FILE *input, const char *filename)
 	doc = xmlCtxtReadFd(ctx, fd, filename, NULL, 0);
 	if (!doc) {
 		fprintf(stderr, "Failed to read XML\n");
-		abort();
+		exit(EXIT_FAILURE);
 	}
 
 	rc = xmlValidateDtd(dtdctx, doc, dtd);
@@ -141,7 +141,7 @@ is_dtd_valid(FILE *input, const char *filename)
 
 	if (lseek(fd, 0, SEEK_SET) != 0) {
 		fprintf(stderr, "Failed to reset fd, output would be garbage.\n");
-		abort();
+		exit(EXIT_FAILURE);
 	}
 #endif
 	return rc;
@@ -154,9 +154,23 @@ struct location {
 	int line_number;
 };
 
+enum element {
+	INVALID,
+	PROTOCOL,
+	COPYRIGHT,
+	INTERFACE,
+	REQUEST,
+	EVENT,
+	ENUM,
+	ENTRY,
+	ARG,
+	DESCRIPTION,
+};
+
 struct description {
 	char *summary;
 	char *text;
+	enum element parent;
 };
 
 struct protocol {
@@ -196,6 +210,7 @@ struct message {
 	int destructor;
 	int since, deprecated_since;
 	struct description *description;
+	enum element direction;
 };
 
 enum arg_type {
@@ -217,6 +232,7 @@ struct arg {
 	struct wl_list link;
 	char *summary;
 	char *enumeration_name;
+	enum element parent;
 };
 
 struct enumeration {
@@ -250,7 +266,66 @@ struct parse_context {
 	struct description *description;
 	char character_data[8192];
 	unsigned int character_data_length;
+	enum element parent;
+	bool copyright_forbidden, description_forbidden;
 };
+
+static void __attribute__((format(printf, 2, 3), noreturn))
+fail(struct location *loc, const char *msg, ...)
+{
+	va_list ap;
+
+	va_start(ap, msg);
+	fprintf(stderr, "%s:%d: error: ",
+		loc->filename, loc->line_number);
+	vfprintf(stderr, msg, ap);
+	fprintf(stderr, "\n");
+	va_end(ap);
+	exit(EXIT_FAILURE);
+}
+
+static enum element
+parse_element_name(struct parse_context *ctx,
+                   const char *element_name)
+{
+	switch (*element_name) {
+	case 'p':
+		if (strcmp(element_name + 1, "rotocol") == 0)
+			return PROTOCOL;
+		break;
+	case 'c':
+		if (strcmp(element_name + 1, "opyright") == 0)
+			return COPYRIGHT;
+		break;
+	case 'i':
+		if (strcmp(element_name + 1, "nterface") == 0)
+			return INTERFACE;
+		break;
+	case 'd':
+		if (strcmp(element_name + 1, "escription") == 0)
+			return DESCRIPTION;
+		break;
+	case 'r':
+		if (strcmp(element_name + 1, "equest") == 0)
+			return REQUEST;
+		break;
+	case 'e':
+		if (strcmp(element_name + 1, "vent") == 0)
+			return EVENT;
+		if (strcmp(element_name + 1, "num") == 0)
+			return ENUM;
+		if (strcmp(element_name + 1, "ntry") == 0)
+			return ENTRY;
+		break;
+	case 'a':
+		if (strcmp(element_name + 1, "rg") == 0)
+			return ARG;
+		break;
+	default:
+		break;
+	}
+	fail(&ctx->loc, "unknown element %s", element_name);
+}
 
 enum identifier_role {
 	STANDALONE_IDENT,
@@ -380,21 +455,7 @@ desc_dump(char *desc, const char *fmt, ...)
 	putchar('\n');
 }
 
-static void __attribute__ ((noreturn))
-fail(struct location *loc, const char *msg, ...)
-{
-	va_list ap;
-
-	va_start(ap, msg);
-	fprintf(stderr, "%s:%d: error: ",
-		loc->filename, loc->line_number);
-	vfprintf(stderr, msg, ap);
-	fprintf(stderr, "\n");
-	va_end(ap);
-	exit(EXIT_FAILURE);
-}
-
-static void
+static void __attribute__((format(printf, 2, 3)))
 warn(struct location *loc, const char *msg, ...)
 {
 	va_list ap;
@@ -421,7 +482,7 @@ is_nullable_type(struct arg *arg)
 }
 
 static struct message *
-create_message(struct location loc, const char *name)
+create_message(struct location loc, const char *name, enum element direction)
 {
 	struct message *message;
 
@@ -429,6 +490,7 @@ create_message(struct location loc, const char *name)
 	message->loc = loc;
 	message->name = xstrdup(name);
 	message->uppercase_name = uppercase_dup(name);
+	message->direction = direction;
 	wl_list_init(&message->arg_list);
 
 	return message;
@@ -616,20 +678,26 @@ strtouint(const char *str)
 {
 	long int ret;
 	char *end;
-	int prev_errno = errno;
+	int prev_errno;
 
+	if (str[0] == '0')
+		return str[1] ? -1 : 0;
+	if (str[0] < '1' || str[0] > '9')
+		return -1;
+
+	prev_errno = errno;
 	errno = 0;
 	ret = strtol(str, &end, 10);
-	if (errno != 0 || end == str || *end != '\0')
-		return -1;
-
-	/* check range */
-	if (ret < 0 || ret > INT_MAX) {
+	if (errno != 0 || end == str || *end != '\0') {
+		errno = prev_errno;
 		return -1;
 	}
-
 	errno = prev_errno;
-	return (int)ret;
+
+	if (ret <= 0)
+		abort(); /* caught by syntax checks */
+
+	return ret > INT_MAX ? -1 : ret;
 }
 
 /* Check that the provided string will produce valid "C" identifiers.
@@ -737,79 +805,118 @@ start_element(void *data, const char *element_name, const char **atts)
 	const char *enumeration_name = NULL;
 	const char *bitfield = NULL;
 	int i, version = 0;
+	enum element element = parse_element_name(ctx, element_name);
 
 	ctx->loc.line_number = XML_GetCurrentLineNumber(ctx->parser);
+	if (ctx->description)
+		fail(&ctx->loc, "element not allowed in <description>");
+	if (ctx->parent == COPYRIGHT)
+		fail(&ctx->loc, "element not allowed in <copyright>");
 	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
+		if (strcmp(atts[i], "name") == 0) {
 			name = atts[i + 1];
-		if (strcmp(atts[i], "version") == 0) {
+			/* Anything with a name can have a description */
+			ctx->description_forbidden = false;
+		} else if (strcmp(atts[i], "version") == 0) {
 			version = strtouint(atts[i + 1]);
 			if (version == -1)
 				fail(&ctx->loc, "wrong version (%s)", atts[i + 1]);
-		}
-		if (strcmp(atts[i], "type") == 0)
+			if (version == 0)
+				fail(&ctx->loc, "version 0 is invalid");
+		} else if (strcmp(atts[i], "type") == 0)
 			type = atts[i + 1];
-		if (strcmp(atts[i], "value") == 0)
+		else if (strcmp(atts[i], "value") == 0)
 			value = atts[i + 1];
-		if (strcmp(atts[i], "interface") == 0)
+		else if (strcmp(atts[i], "interface") == 0)
 			interface_name = atts[i + 1];
-		if (strcmp(atts[i], "summary") == 0)
+		else if (strcmp(atts[i], "summary") == 0)
 			summary = atts[i + 1];
-		if (strcmp(atts[i], "since") == 0)
+		else if (strcmp(atts[i], "since") == 0)
 			since = atts[i + 1];
-		if (strcmp(atts[i], "deprecated-since") == 0)
+		else if (strcmp(atts[i], "deprecated-since") == 0)
 			deprecated_since = atts[i + 1];
-		if (strcmp(atts[i], "allow-null") == 0)
+		else if (strcmp(atts[i], "allow-null") == 0)
 			allow_null = atts[i + 1];
-		if (strcmp(atts[i], "enum") == 0)
+		else if (strcmp(atts[i], "enum") == 0)
 			enumeration_name = atts[i + 1];
-		if (strcmp(atts[i], "bitfield") == 0)
+		else if (strcmp(atts[i], "bitfield") == 0) {
+			if (element != ENUM)
+				fail(&ctx->loc, "bitfield attribute only valid on enum element");
 			bitfield = atts[i + 1];
+		} else {
+			fail(&ctx->loc, "invalid attribute name (%s)", atts[i]);
+		}
 	}
 
 	ctx->character_data_length = 0;
-	if (strcmp(element_name, "protocol") == 0) {
+	if (element == PROTOCOL) {
+		if (ctx->parent != INVALID)
+			fail(&ctx->loc, "Protocol element not root element");
 		if (name == NULL)
 			fail(&ctx->loc, "no protocol name given");
-
+		/* must be valid since name given */
+		if (atts[2])
+			fail(&ctx->loc, "Unexpected attribute for protocol element");
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		ctx->protocol->name = xstrdup(name);
 		ctx->protocol->uppercase_name = uppercase_dup(name);
-	} else if (strcmp(element_name, "copyright") == 0) {
-
-	} else if (strcmp(element_name, "interface") == 0) {
+	} else if (ctx->parent == INVALID) {
+		fail(&ctx->loc, "Root element not <protocol>");
+	} else if (element == COPYRIGHT) {
+		if (atts[0])
+			fail(&ctx->loc, "<copyright> takes no attributes");
+		if (ctx->parent != PROTOCOL)
+			fail(&ctx->loc, "<copyright> must be under <protocol>");
+		if (ctx->copyright_forbidden)
+			fail(&ctx->loc, "<copyright> element not allowed here");
+	} else if (element == INTERFACE) {
 		if (name == NULL)
 			fail(&ctx->loc, "no interface name given");
+		if (ctx->parent != PROTOCOL)
+			fail(&ctx->loc, "<interface> must be under <protocol>");
 
 		if (version == 0)
 			fail(&ctx->loc, "no interface version given");
+
+		/* must be valid since version and name given */
+		if (atts[4])
+			fail(&ctx->loc, "unexpected attribute on interface");
 
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		interface = create_interface(ctx->loc, name, version);
 		ctx->interface = interface;
 		wl_list_insert(ctx->protocol->interface_list.prev,
 			       &interface->link);
-	} else if (strcmp(element_name, "request") == 0 ||
-		   strcmp(element_name, "event") == 0) {
+	} else if (element == REQUEST || element == EVENT) {
 		if (name == NULL)
-			fail(&ctx->loc, "no request name given");
+			fail(&ctx->loc, "no %s name given", element_name);
+		if (ctx->parent != INTERFACE)
+			fail(&ctx->loc, "<%s> not child of <interface>", element_name);
 
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
-		message = create_message(ctx->loc, name);
+		message = create_message(ctx->loc, name, element);
 
-		if (strcmp(element_name, "request") == 0)
+		if (element == REQUEST)
 			wl_list_insert(ctx->interface->request_list.prev,
 				       &message->link);
 		else
 			wl_list_insert(ctx->interface->event_list.prev,
 				       &message->link);
 
-		if (type != NULL && strcmp(type, "destructor") == 0)
+		if (type != NULL) {
+			if (strcmp(type, "destructor") != 0)
+				fail(&ctx->loc, "type of request or event must be \"destructor\" if specified");
 			message->destructor = 1;
+		}
+
+		/* Check for unexpected attributes */
+		if (atts[(1 + message->destructor +
+		         (since != NULL) + (deprecated_since != NULL)) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		version = version_from_since(ctx, since);
 		if (version < ctx->interface->since)
-			warn(&ctx->loc, "since version not increasing\n");
+			fail(&ctx->loc, "since version not increasing\n");
 		ctx->interface->since = version;
 		message->since = version;
 
@@ -824,19 +931,25 @@ start_element(void *data, const char *element_name, const char **atts)
 			fail(&ctx->loc, "destroy request should be destructor type");
 
 		ctx->message = message;
-	} else if (strcmp(element_name, "arg") == 0) {
+	} else if (element == ARG) {
 		if (name == NULL)
 			fail(&ctx->loc, "no argument name given");
+		if (type == NULL)
+			fail(&ctx->loc, "no argument type given");
+		if (ctx->parent != REQUEST && ctx->parent != EVENT)
+			fail(&ctx->loc, "<arg> must be child of <request> or <event>");
 
 		validate_identifier(&ctx->loc, name, STANDALONE_IDENT);
 		arg = create_arg(name);
 		if (!set_arg_type(arg, type))
 			fail(&ctx->loc, "unknown type (%s)", type);
+		if (atts[(2 + !!summary + !!interface_name + !!allow_null + !!enumeration_name) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		switch (arg->type) {
 		case NEW_ID:
 			ctx->message->new_id_count++;
-			/* fallthrough */
+			__attribute__((fallthrough));
 		case OBJECT:
 			if (interface_name) {
 				validate_identifier(&ctx->loc,
@@ -874,9 +987,13 @@ start_element(void *data, const char *element_name, const char **atts)
 
 		wl_list_insert(ctx->message->arg_list.prev, &arg->link);
 		ctx->message->arg_count++;
-	} else if (strcmp(element_name, "enum") == 0) {
+	} else if (element == ENUM) {
 		if (name == NULL)
 			fail(&ctx->loc, "no enum name given");
+		if (ctx->parent != INTERFACE)
+			fail(&ctx->loc, "<enum> not child of <interface>");
+		if (atts[(1 + !!since + !!bitfield) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		enumeration = create_enumeration(name);
@@ -894,9 +1011,15 @@ start_element(void *data, const char *element_name, const char **atts)
 			       &enumeration->link);
 
 		ctx->enumeration = enumeration;
-	} else if (strcmp(element_name, "entry") == 0) {
+	} else if (element == ENTRY) {
 		if (name == NULL)
 			fail(&ctx->loc, "no entry name given");
+		if (value == NULL)
+			fail(&ctx->loc, "no entry value given");
+		if (ctx->parent != ENUM)
+			fail(&ctx->loc, "<%s> not child of <enum>", element_name);
+		if (atts[(2 + !!since + !!summary + !!deprecated_since) * 2] != NULL)
+			fail(&ctx->loc, "<%s> has unexpected attributes", element_name);
 
 		validate_identifier(&ctx->loc, name, TRAILING_IDENT);
 		entry = create_entry(name, value);
@@ -921,12 +1044,18 @@ start_element(void *data, const char *element_name, const char **atts)
 		wl_list_insert(ctx->enumeration->entry_list.prev,
 			       &entry->link);
 		ctx->entry = entry;
-	} else if (strcmp(element_name, "description") == 0) {
+	} else if (element == DESCRIPTION) {
 		if (summary == NULL)
 			fail(&ctx->loc, "description without summary");
+		/* must be valid since summary attribute present */
+		if (atts[2])
+			fail(&ctx->loc, "too many attributes for <description>");
+		if (ctx->description_forbidden)
+			fail(&ctx->loc, "description not allowed here");
 
 		description = xzalloc(sizeof *description);
 		description->summary = xstrdup(summary);
+		description->parent = ctx->parent;
 
 		if (ctx->message)
 			ctx->message->description = description;
@@ -939,7 +1068,10 @@ start_element(void *data, const char *element_name, const char **atts)
 		else
 			ctx->protocol->description = description;
 		ctx->description = description;
+	} else {
+		abort(); /* not reached */
 	}
+	ctx->parent = element;
 }
 
 static struct enumeration *
@@ -1028,34 +1160,62 @@ static void
 end_element(void *data, const XML_Char *name)
 {
 	struct parse_context *ctx = data;
+	ctx->copyright_forbidden = true;
+	ctx->description_forbidden = true;
 
-	if (strcmp(name, "copyright") == 0) {
+	switch (parse_element_name(ctx, name)) {
+	case COPYRIGHT:
 		ctx->protocol->copyright =
-			strndup(ctx->character_data,
-				ctx->character_data_length);
-	} else if (strcmp(name, "description") == 0) {
+			fail_on_null(strndup(ctx->character_data,
+				             ctx->character_data_length));
+		ctx->parent = PROTOCOL;
+		ctx->description_forbidden = false;
+		break;
+	case DESCRIPTION:
 		ctx->description->text =
-			strndup(ctx->character_data,
-				ctx->character_data_length);
+			fail_on_null(strndup(ctx->character_data,
+				     ctx->character_data_length));
+		ctx->parent = ctx->description->parent;
 		ctx->description = NULL;
-	} else if (strcmp(name, "request") == 0 ||
-		   strcmp(name, "event") == 0) {
+		break;
+	case REQUEST:
+	case EVENT:
 		ctx->message = NULL;
-	} else if (strcmp(name, "enum") == 0) {
+		ctx->parent = INTERFACE;
+		break;
+	case ENUM:
 		if (wl_list_empty(&ctx->enumeration->entry_list)) {
 			fail(&ctx->loc, "enumeration %s was empty",
 			     ctx->enumeration->name);
 		}
+		ctx->parent = INTERFACE;
 		ctx->enumeration = NULL;
-	} else if (strcmp(name, "entry") == 0) {
+		break;
+	case ENTRY:
 		ctx->entry = NULL;
-	} else if (strcmp(name, "protocol") == 0) {
+		ctx->parent = ENUM;
+		break;
+	case PROTOCOL: {
 		struct interface *i;
 
 		wl_list_for_each(i, &ctx->protocol->interface_list, link) {
 			verify_arguments(ctx, i, &i->request_list, &i->enumeration_list);
 			verify_arguments(ctx, i, &i->event_list, &i->enumeration_list);
 		}
+		break;
+	}
+	case ARG:
+		ctx->parent = ctx->message->direction;
+		break;
+	case INTERFACE:
+		if (wl_list_empty(&ctx->interface->request_list) &&
+		    wl_list_empty(&ctx->interface->event_list)) {
+			fail(&ctx->loc, "Interface defines no requests and no events");
+		}
+		ctx->parent = PROTOCOL;
+		break;
+	default:
+		abort();
 	}
 }
 
@@ -1207,7 +1367,6 @@ emit_stubs(struct wl_list *message_list, struct interface *interface)
 		     "interface '%s' has method named destroy "
 		     "but no destructor",
 		     interface->name);
-		exit(EXIT_FAILURE);
 	}
 
 	if (!has_destroy && strcmp(interface->name, "wl_display") != 0) {
@@ -2035,7 +2194,7 @@ int main(int argc, char *argv[])
 	bool core_headers = false;
 	bool version = false;
 	bool strict = false;
-	bool fail = false;
+	bool bad_opt = false;
 	int opt;
 	enum {
 		CLIENT_HEADER,
@@ -2074,7 +2233,7 @@ int main(int argc, char *argv[])
 			strict = true;
 			break;
 		default:
-			fail = true;
+			bad_opt = true;
 			break;
 		}
 	}
@@ -2086,7 +2245,7 @@ int main(int argc, char *argv[])
 		usage(EXIT_SUCCESS);
 	else if (version)
 		scanner_version(EXIT_SUCCESS);
-	else if ((argc != 1 && argc != 3) || fail)
+	else if ((argc != 1 && argc != 3) || bad_opt)
 		usage(EXIT_FAILURE);
 	else if (strcmp(argv[0], "help") == 0)
 		usage(EXIT_SUCCESS);
@@ -2179,6 +2338,10 @@ int main(int argc, char *argv[])
 	} while (len > 0);
 
 	XML_ParserFree(ctx.parser);
+	ctx.parser = NULL;
+
+	if (wl_list_empty(&ctx.protocol->interface_list))
+		fail(&ctx.loc, "Protocol defines no interfaces");
 
 	switch (mode) {
 		case CLIENT_HEADER:
