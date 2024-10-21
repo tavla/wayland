@@ -1715,3 +1715,32 @@ TEST(no_source_terminate)
 	display_run(d);
 	display_destroy(d);
 }
+
+struct terminate_on_event_loop_destroy_data {
+	struct wl_display *display;
+	struct wl_listener loop_destroy_listener;
+};
+
+static void
+handle_event_loop_destroy(struct wl_listener *listener, void *user_data)
+{
+	struct terminate_on_event_loop_destroy_data *data =
+		wl_container_of(listener, data, loop_destroy_listener);
+	wl_display_terminate(data->display);
+}
+
+TEST(terminate_on_event_loop_destroy)
+{
+	struct display *d;
+	struct wl_event_loop *loop;
+	struct terminate_on_event_loop_destroy_data data;
+
+	d = display_create();
+	loop = wl_display_get_event_loop(d->wl_display);
+
+	data.display = d->wl_display;
+	data.loop_destroy_listener.notify = handle_event_loop_destroy;
+	wl_event_loop_add_destroy_listener(loop, &data.loop_destroy_listener);
+
+	display_destroy(d);
+}

@@ -1267,10 +1267,11 @@ wl_display_destroy(struct wl_display *display)
 		wl_socket_destroy(s);
 	}
 
-	close(display->terminate_efd);
 	wl_event_source_remove(display->term_source);
 
 	wl_event_loop_destroy(display->loop);
+
+	close(display->terminate_efd);
 
 	wl_list_for_each_safe(global, gnext, &display->global_list, link)
 		free(global);
