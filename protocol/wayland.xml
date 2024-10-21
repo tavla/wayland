@@ -516,7 +516,7 @@
     </event>
   </interface>
 
-  <interface name="wl_data_offer" version="3">
+  <interface name="wl_data_offer" version="4">
     <description summary="offer to transfer data">
       A wl_data_offer represents a piece of data offered for transfer
       by another client (the source client).  It is used by the
@@ -709,7 +709,7 @@
     </event>
   </interface>
 
-  <interface name="wl_data_source" version="3">
+  <interface name="wl_data_source" version="4">
     <description summary="offer to transfer data">
       The wl_data_source object is the source side of a wl_data_offer.
       It is created by the source client in a data transfer and
@@ -864,7 +864,7 @@
     </event>
   </interface>
 
-  <interface name="wl_data_device" version="3">
+  <interface name="wl_data_device" version="4">
     <description summary="data transfer device">
       There is one wl_data_device per seat which can be obtained
       from the global wl_data_device_manager singleton.
@@ -1004,13 +1004,12 @@
 	data_device.data_offer and the data_offer.offer events are
 	sent out immediately before this event to introduce the data
 	offer object.  The selection event is sent to a client
-	immediately before receiving keyboard focus and when a new
-	selection is set while the client has keyboard focus.  The
+	immediately before receiving data device focus and when a new
+	selection is set while the client has data device focus.  The
 	data_offer is valid until a new data_offer or NULL is received
-	or until the client loses keyboard focus.  Switching surface with
-	keyboard focus within the same client doesn't mean a new selection
-	will be sent.  The client must destroy the previous selection
-	data_offer, if any, upon receiving this event.
+	or until the client loses data device focus. The client must
+	destroy the previous selection data_offer, if any, upon receiving
+	this event.
       </description>
       <arg name="id" type="object" interface="wl_data_offer" allow-null="true"
 	   summary="selection data_offer object"/>
@@ -1023,9 +1022,33 @@
 	This request destroys the data device.
       </description>
     </request>
+
+    <!-- Version 4 additions -->
+
+    <event name="enter" since="4">
+      <description summary="focus gained">
+	Notification that this seat's data device has gained focus.
+
+	The compositor must send the wl_data_device.selection event before this
+	event.
+
+	Before version 4, data device focus was indicated by keyboard focus.
+	Switching surface with keyboard focus within the same client didn't mean
+	a new selection event was sent.
+      </description>
+    </event>
+
+    <event name="leave" since="4">
+      <description summary="focus lost">
+	Notification that this seat's data device has lost focus.
+
+	The client will stop receiving selection events until the next enter
+	event.
+      </description>
+    </event>
   </interface>
 
-  <interface name="wl_data_device_manager" version="3">
+  <interface name="wl_data_device_manager" version="4">
     <description summary="data transfer interface">
       The wl_data_device_manager is a singleton global object that
       provides access to inter-client data transfer mechanisms such as
