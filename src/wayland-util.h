@@ -70,7 +70,7 @@ extern "C" {
 #define WL_PRINTF(x, y)
 #endif
 
-#if  defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
 #define WL_TYPEOF(expr) typeof(expr)
 #else
 #define WL_TYPEOF(expr) __typeof__(expr)
