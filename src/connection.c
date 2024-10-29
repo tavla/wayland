@@ -885,6 +885,153 @@ wl_closure_vmarshal(struct wl_object *sender, uint32_t opcode, va_list ap,
 	return wl_closure_marshal(sender, opcode, args, message);
 }
 
+/*
+ * Check that the provided string has no embedded NUL bytes
+ * and is valid UTF-8.  The caller checks that the string is
+ * NUL-terminated.
+ */
+static bool wayland_string_validate(const unsigned char *const s,
+                                    const unsigned char *const end,
+                                    const struct wl_message *const message)
+{
+	const unsigned char *p = s;
+	unsigned char first, b;
+
+	/*
+	 * Check that the string is NUL-terminated now, so that
+	 * the loop can assume that if a byte is not NUL, the end
+	 * of the string has not been reached.
+	 */
+
+	for (;;) {
+		bool okay;
+
+		/*
+		 * Many strings are ASCII, so handle them in a fast path.
+		 * This loop skips all non-NUL ASCII characters.
+		 */
+		do {
+			first = *p++;
+		} while (first > 0 && first < 0x80);
+
+		if (first == 0x0) {
+			/*
+			 * p was incremented above. If it is equal to end,
+			 * the string is okay.
+			 */
+			if (p == end)
+				return true;
+			/* NUL byte before end of string is an error. */
+			wl_log("string has embedded nul at offset %td, "
+			       "message %s(%s)\n", p - s,
+			       message->name, message->signature);
+			errno = EINVAL;
+			return false;
+		}
+
+		/*
+		 * Validate that the string is well-formed UTF-8.
+		 * ASCII bytes have already been checked for.  Start by rejecting the
+		 * following values, which are not valid as the start of a multibyte UTF-8
+		 * sequence.
+		 *
+		 * 0x80 ... 0xBF: 0b10xxxxxx, continuation bytes.
+		 * 0xC0 ... 0xC1: 0b1100000x 0b10xxxxxx, overlong encoding of 0x0 ... 0x7F.
+		 * 0xF5 ... 0xF7: 0b111101xx 0b10xxxxxx 0b10xxxxxx 0b10xxxxxx where at least
+		 *                one of the first two "x" bits is set.  This corresponds
+		 *                to 0b1 xxxx xxxx xxxx xxxx xxxx with at least one of the
+		 *                first two "x" bits set, or 0x140000 ... 0x1FFFFF.  These
+		 *                all exceed 0x10FFFF, the largest Unicode code point.
+		 * 0xF8 ... 0xFF: These are of the form 0b11111xxx.  They
+		 *                correspond to 5-, 6-, 7-, or 8-byte encodings,
+		 *                which are all invalid: every code point can be expressed
+		 *                in at most 4 bytes, so longer encodings are either
+		 *                overlong or exceed the 0x10FFFF limit.
+		 */
+		if (first < 0xC2 || first > 0xF4) {
+			wl_log("string has invalid UTF-8 start byte 0x%hhx "
+			       "at offset %td, message %s(%s)\n", first, p - s,
+			       message->name, message->signature);
+			errno = EILSEQ;
+			return false;
+		}
+		b = *p++;
+		switch (first) {
+		case 0xe0:
+			/*
+			 * 3-byte encoding of form 0b11100000 0b10xxxxxx 0b10xxxxxx.
+			 * The greatest 2-byte encoding is 0b11011111 0b10111111 or
+			 * 0b011111111111, which is 0x7FF.  Therefore, for the encoding
+			 * to not be overlong, the first "x" bit must be set.
+			 */
+			okay = (b >= 0xa0 && b <= 0xbf);
+			break;
+		case 0xed:
+			/*
+			 * 3-byte encoding of form 0b11101101 0b10xxxxxx 0b10xxxxxx,
+			 * or 0xDxxx.  Values in the range 0xD800 ... 0xDFFF are surrogates,
+			 * which are not valid Unicode code points.  Therefore, only values
+			 * in the range 0xD000 ... 0xD7FF are permitted, meaning that the
+			 * first "x" bit must be clear.
+			 */
+			okay = (b >= 0x80 && b <= 0x9f);
+			break;
+		case 0xf0:
+			/*
+			 * 4-byte encoding of form 0b11110000 0b10xxxxxx 0b10xxxxxx 0b10xxxxxx.
+			 * The greatest 3-byte encoding is 0b11101111 0b10111111 0b10111111 or
+			 * 0b001111 111111 111111, which is 0xFFFF.  Therefore, for the encoding
+			 * to not be overlong, the first continuation byte must be at least
+			 * 0b10010000, or 0x90.
+			 */
+			okay = (b >= 0x90 && b <= 0xbf);
+			break;
+		case 0xf4:
+			/*
+			 * 4-byte encoding of form 0b11110100 0b10xxxxxx 0b10xxxxxx 0b10xxxxxx.
+			 * The largest Unicode code point is 0x10FFFF, encoded as
+			 * 0b11110100 0b10001111 0b10111111 0b10111111.  Therefore,
+			 * the first continuation byte must not exceed 0b10001111,
+			 * or 0x8F.
+			 */
+			okay = (b >= 0x80 && b <= 0x8F);
+			break;
+		default:
+			/* Default range is 0x80 to 0xBF */
+			okay = (b >= 0x80 && b <= 0xBF);
+			break;
+		}
+		if (!okay) {
+			if (first == 0xED && b >= 0xA0 && b <= 0xBF && 0x80 <= p[0] && p[0] <= 0xBF) {
+				/* Give better error for surrogates, in case they arise from e.g.
+				 * naive UCS-2 decoding. */
+				wl_log("surrogate 0xD%x at offset %td, message %s(%s)",
+				       (unsigned int)((b & 0x3F) << 6 | (p[0] & 0x3F)),
+				       (p - s) - 2, message->name, message->signature);
+				errno = EILSEQ;
+				return false;
+			}
+			break; /* invalid */
+		}
+		if (first < 0xE0)
+			continue; /* 2 byte */
+		b = *p++;
+		if (b < 0x80 || b > 0xBF)
+			break; /* invalid */
+		if (first < 0xF0)
+			continue; /* 3 bytes */
+		b = *p++;
+		if (b < 0x80 || b > 0xBF)
+			break; /* invalid */
+		/* valid 4 byte */
+	}
+	wl_log("string has invalid UTF-8 continuation byte 0x%hhx "
+	       "at offset %td, message %s(%s)\n", b, p - s,
+	       message->name, message->signature);
+	errno = EILSEQ;
+	return false;
+}
+
 struct wl_closure *
 wl_connection_demarshal(struct wl_connection *connection,
 			uint32_t size,
@@ -893,7 +1040,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 {
 	uint32_t *p, *next, *end, length, length_in_u32, id;
 	int fd;
-	char *s;
+	const unsigned char *s;
 	int i, count, num_arrays;
 	const char *signature;
 	struct argument_details arg;
@@ -973,7 +1120,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 			}
 			next = p + length_in_u32;
 
-			s = (char *) p;
+			s = (const unsigned char *)p;
 
 			if (s[length - 1] != '\0') {
 				wl_log("string not nul-terminated, "
@@ -983,15 +1130,10 @@ wl_connection_demarshal(struct wl_connection *connection,
 				goto err;
 			}
 
-			if (strlen(s) != length - 1) {
-				wl_log("string has embedded nul at offset %zu, "
-				       "message %s(%s)\n", strlen(s),
-				       message->name, message->signature);
-				errno = EINVAL;
+			if (!wayland_string_validate(s, s + length, message))
 				goto err;
-			}
 
-			closure->args[i].s = s;
+			closure->args[i].s = (const char *)s;
 			p = next;
 			break;
 		case WL_ARG_OBJECT:

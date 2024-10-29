@@ -153,7 +153,10 @@
 	      followed by the UTF-8 encoded string contents, including
 	      terminating null byte, then padding to a 32-bit boundary. A null
 	      value is represented with a length of 0. Interior null bytes are
-	      not permitted.
+	      not permitted. Implementations should reject strings that are not
+	      valid UTF-8, including without limitation strings that contain
+	      overlong encodings, surrogates, or encodings of codepoints
+	      exceeding 0x10FFFF.
 	    </para>
 	  </listitem>
 	</varlistentry>

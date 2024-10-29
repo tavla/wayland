@@ -443,12 +443,14 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 			break;
 		} else if (closure == NULL ||
 			   wl_closure_lookup_objects(closure, &client->objects) < 0) {
+			bool invalid_utf8 = closure == NULL && errno == EILSEQ;
 			wl_resource_post_error(client->display_resource,
 					       WL_DISPLAY_ERROR_INVALID_METHOD,
-					       "invalid arguments for %s#%u.%s",
+					       "invalid arguments for %s#%u.%s%s",
 					       object->interface->name,
 					       object->id,
-					       message->name);
+					       message->name,
+					       invalid_utf8 ? ": invalid UTF-8 in string" : "");
 			wl_closure_destroy(closure);
 			break;
 		}
