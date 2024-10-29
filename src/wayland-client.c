@@ -45,6 +45,7 @@
 #include "wayland-os.h"
 #include "wayland-client.h"
 #include "wayland-private.h"
+#include "wayland-client-private.h"
 
 /** \cond */
 
@@ -57,58 +58,6 @@ enum wl_proxy_flag {
 struct wl_zombie {
 	int event_count;
 	int *fd_count;
-};
-
-struct wl_proxy {
-	struct wl_object object;
-	struct wl_display *display;
-	struct wl_event_queue *queue;
-	uint32_t flags;
-	int refcount;
-	void *user_data;
-	wl_dispatcher_func_t dispatcher;
-	uint32_t version;
-	const char * const *tag;
-	struct wl_list queue_link; /**< in struct wl_event_queue::proxy_list */
-};
-
-struct wl_event_queue {
-	struct wl_list event_list;
-	struct wl_list proxy_list; /**< struct wl_proxy::queue_link */
-	struct wl_display *display;
-	char *name;
-};
-
-struct wl_display {
-	struct wl_proxy proxy;
-	struct wl_connection *connection;
-
-	/* errno of the last wl_display error */
-	int last_error;
-
-	/* When display gets an error event from some object, it stores
-	 * information about it here, so that client can get this
-	 * information afterwards */
-	struct {
-		/* Code of the error. It can be compared to
-		 * the interface's errors enumeration. */
-		uint32_t code;
-		/* interface (protocol) in which the error occurred */
-		const struct wl_interface *interface;
-		/* id of the proxy that caused the error. There's no warranty
-		 * that the proxy is still valid. It's up to client how it will
-		 * use it */
-		uint32_t id;
-	} protocol_error;
-	int fd;
-	struct wl_map objects;
-	struct wl_event_queue display_queue;
-	struct wl_event_queue default_queue;
-	pthread_mutex_t mutex;
-
-	int reader_count;
-	uint32_t read_serial;
-	pthread_cond_t reader_cond;
 };
 
 /** \endcond */
@@ -1560,6 +1509,28 @@ queue_event(struct wl_display *display, int len)
 	id = p[0];
 	opcode = p[1] & 0xffff;
 	size = p[1] >> 16;
+
+	/*
+	 * If the message is larger than the maximum size of the
+	 * connection buffer, the connection buffer will fill to
+	 * its max size and stay there, with no message ever
+	 * successfully being processed.  If the user of
+	 * libwayland-client uses a level-triggered event loop,
+	 * this will cause the client to enter a loop that
+	 * consumes CPU.  To avoid this, immediately drop the
+	 * connection.  Since the maximum size of a message should
+	 * not depend on the max buffer size chosen by the client,
+	 * always compare the message size against the
+	 * limit enforced by libwayland 1.22 and below (4096),
+	 * rather than the actual value the client chose.
+	 */
+	if (size > WL_MAX_MESSAGE_SIZE) {
+		wl_log("Message length %u exceeds limit %d\n",
+		       size, WL_MAX_MESSAGE_SIZE);
+		errno = E2BIG;
+		return -1;
+	}
+
 	if (len < size)
 		return 0;
 

@@ -34,8 +34,8 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <signal.h>
-
-#define WL_HIDE_DEPRECATED
+#include "wayland-private.h"
+#include "wayland-client-private.h"
 
 #include "test-runner.h"
 #include "test-compositor.h"
@@ -49,6 +49,8 @@ static const struct wl_message tc_requests[] = {
 	/* this request serves as a barrier for synchronizing*/
 	{ "stop_display", "u", NULL },
 	{ "noop", "", NULL },
+	{ "long_request", "a", NULL },
+	{ "set_buffer_size", "u", NULL },
 };
 
 static const struct wl_message tc_events[] = {
@@ -57,7 +59,7 @@ static const struct wl_message tc_events[] = {
 
 const struct wl_interface test_compositor_interface = {
 	"test", 1,
-	2, tc_requests,
+	4, tc_requests,
 	1, tc_events
 };
 
@@ -67,6 +69,12 @@ struct test_compositor_interface {
 			     uint32_t num);
 	void (*noop)(struct wl_client *client,
 			     struct wl_resource *resource);
+	void (*handle_long_request)(struct wl_client *client,
+			     struct wl_resource *resource,
+			     struct wl_array *array);
+	void (*handle_set_buffer_size)(struct wl_client *client,
+			     struct wl_resource *resource,
+			     uint32_t buffer_size);
 };
 
 struct test_compositor_listener {
@@ -76,11 +84,13 @@ struct test_compositor_listener {
 
 enum {
 	STOP_DISPLAY = 0,
-	TEST_NOOP = 1
+	TEST_NOOP = 1,
+	LONG_REQUEST = 2,
+	SET_BUFFER_SIZE = 3,
 };
 
 enum {
-	DISPLAY_RESUMED = 0
+	DISPLAY_RESUMED = 0,
 };
 
 /* Since tests can run parallelly, we need unique socket names
@@ -338,9 +348,29 @@ handle_noop(struct wl_client *client, struct wl_resource *resource)
 	(void)resource;
 }
 
+static void
+handle_long_request(struct wl_client *client, struct wl_resource *resource, struct wl_array *array)
+{
+	(void)client;
+	(void)resource;
+	(void)array;
+	/* This request should be rejected before the handler is called. */
+	assert(array->size <= 4096 - 12 &&
+	       "overlong message not rejected sooner");
+}
+
+static void
+handle_set_buffer_size(struct wl_client *client, struct wl_resource *resource, uint32_t buffer_size)
+{
+	(void)resource;
+	wl_client_set_max_buffer_size(client, buffer_size);
+}
+
 static const struct test_compositor_interface tc_implementation = {
 	handle_stop_display,
 	handle_noop,
+	handle_long_request,
+	handle_set_buffer_size,
 };
 
 static void
@@ -582,4 +612,33 @@ void
 noop_request(struct client *c)
 {
 	wl_proxy_marshal((struct wl_proxy *) c->tc, TEST_NOOP);
+}
+
+void
+set_buffer_size(struct client *c, uint32_t size)
+{
+	wl_proxy_marshal((struct wl_proxy *) c->tc, SET_BUFFER_SIZE, size);
+}
+
+void
+long_request(struct client *c, struct wl_array *array)
+{
+	/* 12 is 8 bytes for the header and 4 bytes for the array length. */
+
+	/* Ensure that the array can validly be encoded in a message. */
+	assert(array->size <= (UINT16_MAX & ~UINT16_C(3)) - 12 && "overlong wl_array");
+
+	struct wl_proxy *proxy = (struct wl_proxy *)c->tc;
+	if (array->size > WL_MAX_MESSAGE_SIZE - 12) {
+		size_t size = 12 + ((array->size + 3) & ~3);
+		uint32_t buf[2];
+
+		/* The server will post an error after getting
+		 * the header, so don't send the request body. */
+		buf[0] = wl_proxy_get_id(proxy);
+		buf[1] = size << 16 | LONG_REQUEST;
+		assert(wl_connection_write(proxy->display->connection, buf, sizeof(buf)) == 0);
+	} else {
+		wl_proxy_marshal(proxy, LONG_REQUEST, array);
+	}
 }
