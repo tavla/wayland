@@ -1019,27 +1019,31 @@ registry_bind(struct wl_client *client,
 	if (&global->link == &display->global_list)
 		wl_resource_post_error(resource,
 				       WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "invalid global %s (%d)", interface, name);
+				       "invalid global %s (%" PRIu32 ")",
+				       interface, name);
 	else if (strcmp(global->interface->name, interface) != 0)
 		wl_resource_post_error(resource,
 				       WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "invalid interface for global %u: "
-				       "have %s, wanted %s",
+				       "invalid interface for global %" PRIu32
+				       ": have %s, wanted %s",
 				       name, interface, global->interface->name);
 	else if (version == 0)
 		wl_resource_post_error(resource,
 				       WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "invalid version for global %s (%d): 0 is not a valid version",
+				       "invalid version for global %s (%" PRIu32
+				       "): 0 is not a valid version",
 				       interface, name);
 	else if (global->version < version)
 		wl_resource_post_error(resource,
 				       WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "invalid version for global %s (%d): have %d, wanted %d",
+				       "invalid version for global %s (%" PRIu32 "): "
+				       "have %" PRIu32 ", wanted %" PRIu32,
 				       interface, name, global->version, version);
 	else if (!wl_global_is_visible(client, global))
 		wl_resource_post_error(resource,
 				       WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "invalid global %s (%d)", interface, name);
+				       "invalid global %s (%" PRIu32 ")",
+				       interface, name);
 	else
 		global->bind(client, global->data, version, id);
 }
@@ -1330,6 +1334,15 @@ wl_global_create(struct wl_display *display,
 			interface->name, version);
 		return NULL;
 	}
+
+#if INT_MAX > UINT32_MAX
+	if (version > (int)UINT32_MAX) {
+		wl_log("wl_global_create: failing to create interface "
+		       "'%s' with version %d because it is above %" PRIu32 "\n"
+			interface->name, version, UINT32_MAX);
+		return NULL;
+	}
+#endif
 
 	if (version > interface->version) {
 		wl_log("wl_global_create: implemented version for '%s' "

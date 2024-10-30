@@ -32,8 +32,20 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
 
 #define WL_HIDE_DEPRECATED 1
+
+#if __STDC_VERSION__ >= 202311L
+/* _Static_assert is allowed but deprecated. */
+# define STATIC_ASSERT(a, b) static_assert(a, b)
+#elif __STDC_VERSION__ >= 201112L
+/* static_assert is provided by <assert.h>, but libwayland doesn't use <assert.h> */
+# define STATIC_ASSERT(a, b) _Static_assert(a, b)
+#else
+/* Use legacy method. */
+# define STATIC_ASSERT(a, b) ((void)sizeof(char[(a) ? 1 : -1]))
+#endif
 
 #include "wayland-util.h"
 
@@ -133,13 +145,13 @@ wl_connection_copy(struct wl_connection *connection, void *data, size_t size);
 void
 wl_connection_consume(struct wl_connection *connection, size_t size);
 
-int
+ssize_t
 wl_connection_flush(struct wl_connection *connection);
 
 uint32_t
 wl_connection_pending_input(struct wl_connection *connection);
 
-int
+ssize_t
 wl_connection_read(struct wl_connection *connection);
 
 int

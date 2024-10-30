@@ -260,7 +260,7 @@ ring_buffer_ensure_space(struct wl_ring_buffer *b, size_t count)
 	 * allowed).
 	 */
 	if (net_size > size_pot(size_bits)) {
-		wl_log("Data too big for buffer (%d + %zd > %zd).\n",
+		wl_log("Data too big for buffer (%zu + %zu > %zu).\n",
 		       ring_buffer_size(b), count, size_pot(size_bits));
 		errno = E2BIG;
 		return -1;
@@ -422,14 +422,23 @@ decode_cmsg(struct wl_ring_buffer *buffer, struct msghdr *msg)
 			continue;
 
 		size = cmsg->cmsg_len - CMSG_LEN(0);
+		if (size % sizeof(int) != 0) {
+			/* This indicates a kernel bug. */
+			wl_abort("SOL_SOCKET SCM_RIGHTS cmsg has invalid size %zu\n", size);
+		}
 
 		if (ring_buffer_ensure_space(buffer, size) < 0 || overflow) {
+			const unsigned char *data = CMSG_DATA(cmsg);
 			overflow = 1;
-			size /= sizeof(int32_t);
-			for (i = 0; i < size; i++)
-				close(((int*)CMSG_DATA(cmsg))[i]);
+			for (i = 0; i < size; i += sizeof(int)) {
+				/* man:cmsg(3) requires that memcpy()
+				 * be used instead of a pointer cast. */
+				int fd;
+				memcpy(&fd, data + i, sizeof(fd));
+				close(fd);
+			}
 		} else if (ring_buffer_put(buffer, CMSG_DATA(cmsg), size) < 0) {
-				return -1;
+			return -1;
 		}
 	}
 
@@ -441,22 +450,26 @@ decode_cmsg(struct wl_ring_buffer *buffer, struct msghdr *msg)
 	return 0;
 }
 
-int
+ssize_t
 wl_connection_flush(struct wl_connection *connection)
 {
 	struct iovec iov[2];
 	struct msghdr msg = {0};
-	char cmsg[CLEN];
-	int len = 0, count;
+	ssize_t len = 0;
+	union {
+		char cmsg[CLEN];
+		struct cmsghdr align;
+	} u;
 	size_t clen;
 	size_t tail;
+	int count;
 
 	if (!connection->want_flush)
 		return 0;
 
 	tail = connection->out.tail;
 	while (ring_buffer_size(&connection->out) > 0) {
-		build_cmsg(&connection->fds_out, cmsg, &clen);
+		build_cmsg(&connection->fds_out, u.cmsg, &clen);
 
 		if (clen >= CLEN) {
 			/* UNIX domain sockets allows to send file descriptors
@@ -485,7 +498,7 @@ wl_connection_flush(struct wl_connection *connection)
 		msg.msg_namelen = 0;
 		msg.msg_iov = iov;
 		msg.msg_iovlen = count;
-		msg.msg_control = (clen > 0) ? cmsg : NULL;
+		msg.msg_control = (clen > 0) ? u.cmsg : NULL;
 		msg.msg_controllen = clen;
 
 		do {
@@ -512,13 +525,17 @@ wl_connection_pending_input(struct wl_connection *connection)
 	return ring_buffer_size(&connection->in);
 }
 
-int
+ssize_t
 wl_connection_read(struct wl_connection *connection)
 {
 	struct iovec iov[2];
 	struct msghdr msg;
-	char cmsg[CLEN];
-	int len, count, ret;
+	union {
+		char cmsg[CLEN];
+		struct cmsghdr align;
+	} u;
+	int count, ret;
+	ssize_t len;
 
 	while (1) {
 		int data_size = ring_buffer_size(&connection->in);
@@ -536,8 +553,8 @@ wl_connection_read(struct wl_connection *connection)
 		msg.msg_namelen = 0;
 		msg.msg_iov = iov;
 		msg.msg_iovlen = count;
-		msg.msg_control = cmsg;
-		msg.msg_controllen = sizeof cmsg;
+		msg.msg_control = u.cmsg;
+		msg.msg_controllen = sizeof u.cmsg;
 		msg.msg_flags = 0;
 
 		do {
@@ -917,7 +934,10 @@ wl_connection_demarshal(struct wl_connection *connection,
 	count = closure->count;
 
 	array_extra = closure->extra;
-	p = (uint32_t *)(closure->extra + num_arrays);
+	STATIC_ASSERT(sizeof(*closure) % sizeof(*p) == 0, "pointer would be misaligned");
+	STATIC_ASSERT(sizeof(struct wl_array) % sizeof(*p) == 0, "pointer would be misaligned");
+	p = (uint32_t *)((char *)closure + sizeof(*closure) +
+			 num_arrays * sizeof(struct wl_array));
 	end = p + size / sizeof *p;
 
 	wl_connection_copy(connection, p, size);
@@ -928,7 +948,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 	for (i = 0; i < count; i++) {
 		signature = get_next_argument(signature, &arg);
 
-		if (arg.type != WL_ARG_FD && p + 1 > end) {
+		if (arg.type != WL_ARG_FD && p >= end) {
 			wl_log("message too short, "
 			       "object (%d), message %s(%s)\n",
 			       closure->sender_id, message->name,
@@ -1351,7 +1371,7 @@ serialize_closure(struct wl_closure *closure, uint32_t *buffer,
 		if (arg.type == WL_ARG_FD)
 			continue;
 
-		if (p + 1 > end)
+		if (p >= end)
 			goto overflow;
 
 		switch (arg.type) {
@@ -1379,7 +1399,7 @@ serialize_closure(struct wl_closure *closure, uint32_t *buffer,
 			size = strlen(closure->args[i].s) + 1;
 			*p++ = size;
 
-			if (p + div_roundup(size, sizeof *p) > end)
+			if (div_roundup(size, sizeof *p) > (uint32_t)(end - p))
 				goto overflow;
 
 			memcpy(p, closure->args[i].s, size);
@@ -1394,7 +1414,7 @@ serialize_closure(struct wl_closure *closure, uint32_t *buffer,
 			size = closure->args[i].a->size;
 			*p++ = size;
 
-			if (p + div_roundup(size, sizeof *p) > end)
+			if (div_roundup(size, sizeof *p) > (uint32_t)(end - p))
 				goto overflow;
 
 			if (size != 0)
