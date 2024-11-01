@@ -283,7 +283,7 @@ shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
 
 	if (size < pool->size) {
 		wl_resource_post_error(resource,
-				       WL_SHM_ERROR_INVALID_FD,
+				       WL_SHM_ERROR_INVALID_STRIDE,
 				       "shrinking pool invalid");
 		return;
 	}
